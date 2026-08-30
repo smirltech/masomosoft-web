@@ -9,6 +9,7 @@ use Carbon\Carbon;
 use Illuminate\Database\Eloquent\Concerns\HasUlids;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\SoftDeletes;
 use OwenIt\Auditing\Contracts\Auditable;
 
@@ -29,8 +30,19 @@ class Revenu extends Model implements Auditable
         // set user on creating
         static::creating(function (Revenu $model) {
             $model->user_id = $model->user_id ?? auth()->id();
+            $model->annee_id ??= Annee::id();
         });
     }
+
+    public function annee(): BelongsTo
+{
+    return $this->belongsTo(Annee::class);
+}
+
+public function scopeForAnnee($query, int $anneeId)
+{
+    return $query->where('annee_id', $anneeId);
+}
 
     public static function dataOfLast($days = 7): array
     {

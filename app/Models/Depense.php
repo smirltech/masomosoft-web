@@ -39,6 +39,9 @@ class Depense extends Model implements Auditable
 
     protected $with = ['user'];
 
+
+
+
     public static function dataOfLast($days = 7): array
     {
         $data = [];
@@ -49,6 +52,16 @@ class Depense extends Model implements Auditable
 
         return $data;
     }
+
+    public function annee(): BelongsTo
+{
+    return $this->belongsTo(Annee::class);
+}
+
+public function scopeForAnnee($query, int $anneeId)
+{
+    return $query->where('annee_id', $anneeId);
+}
 
     // set status
 
@@ -95,6 +108,7 @@ class Depense extends Model implements Auditable
             if (!$depense->user_id) {
                 $depense->user_id = Auth::id();
             }
+              $depense->annee_id ??= Annee::id();
         });
 
         self::created(function (Depense $depense) {

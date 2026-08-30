@@ -4,6 +4,7 @@ namespace App\Models;
 
 use Carbon\Carbon;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
 class Annee extends Model
 {
@@ -20,6 +21,8 @@ class Annee extends Model
         'start_year',
         'end_year',
     ];
+
+
 
     /**
      * Renvoie l'id de l'année scolaire en cours
@@ -44,11 +47,20 @@ class Annee extends Model
 
     }
 
+    public function scopeForAnnee($query, int $anneeId)
+{
+    return $query->where('annee_id', $anneeId);
+}
+
     public static function end(): Carbon
     {
         return self::encours()->date_fin;
 
     }
+    public function annee(): BelongsTo
+{
+    return $this->belongsTo(Annee::class);
+}
 
     public function getNomEditAttribute(): string
     {

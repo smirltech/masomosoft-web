@@ -1,18 +1,12 @@
 <?php
 
-use App\Http\Controllers\Api\ClasseController;
-use App\Http\Controllers\Api\EleveController;
-use App\Http\Controllers\Api\FiliereController;
-use App\Http\Controllers\Api\InscriptionController;
-use App\Http\Controllers\Api\OptionController;
-use App\Http\Controllers\Api\SectionController;
-use App\Http\Controllers\Api\V1\Finance\ReceiptController;
+
 use App\Http\Controllers\Api\V1\AuthController;
 use App\Http\Controllers\Api\V1\ContextController;
-use App\Http\Resources\AnneeResource;
-use App\Models\Annee;
+use App\Http\Controllers\Api\V1\DashboardController;
+use App\Http\Controllers\Api\V1\Scolarite\EleveController;
 use Illuminate\Support\Facades\Route;
-use Orion\Facades\Orion;
+
 
 Route::prefix('v1')->group(function () {
     Route::post('/auth/login', [AuthController::class, 'login']);
@@ -22,14 +16,12 @@ Route::prefix('v1')->group(function () {
         Route::get('/auth/me', [AuthController::class, 'me']);
 
         Route::get('/context', [ContextController::class, 'index']);
-    });
 
-    Route::prefix('finance')->group(function () {
+        Route::get('/dashboard', [DashboardController::class, 'index']);
 
-        Route::get(
-            'receipts',
-            [ReceiptController::class, 'index']
-        )->name('api.v1.finance.receipts.index');
+        Route::get('/scolarite/eleves', [EleveController::class, 'index'])
+            ->name('api.v1.scolarite.eleves.index');
+
 
     });
 
