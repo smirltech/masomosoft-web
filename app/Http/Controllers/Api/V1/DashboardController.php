@@ -12,7 +12,6 @@ class DashboardController extends Controller
         private DashboardService $dashboardService
     ) {
     }
-
     public function index(): JsonResponse
     {
         return response()->json([
