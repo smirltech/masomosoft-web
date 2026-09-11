@@ -119,7 +119,7 @@
                                                         type="button"
                                                         title="Modifier Relation" class="ml-2" data-toggle="modal"
                                                         data-target="#edit-relation-modal">
-                                            <span class="fa fa-link"></span>
+                                            <img src="{{ asset('images/logo.jpg') }}" alt="logo" style="width: 1em; height: 1em; object-fit: contain; vertical-align: -0.125em;">
                                         </span></td>
                                                 <td>{{ $responsable_eleve->eleve->currentInscription()->classe->code??'' }}</td>
                                                 <td>

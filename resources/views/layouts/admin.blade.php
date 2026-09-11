@@ -1,6 +1,11 @@
 @php use App\Models\Annee; @endphp
 @extends('adminlte::page')
 
+@section('meta_tags')
+    <link rel="icon" type="image/x-icon" href="{{ asset('images/logo.ico') }}">
+    <meta property="og:image" content="{{ asset('images/icons/logo.png') }}">
+@stop
+
 @section('title')
     {{$title ?? null}}
 @endsection

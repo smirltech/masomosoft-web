@@ -30,7 +30,7 @@ return [
     |
     */
 
-    'use_ico_only' => true,
+    'use_ico_only' => false,
     'use_full_favicon' => false,
 
     /*
@@ -64,7 +64,7 @@ return [
     */
 
     'logo' => env('APP_NAME'),
-    'logo_img' => 'images\icons\logo.png',
+    'logo_img' => 'images/logo.jpg',
     'logo_img_class' => 'brand-image img-circle elevation-3',
     'logo_img_xl' => null,
     'logo_img_xl_class' => 'brand-image-xs',
@@ -85,7 +85,7 @@ return [
     'preloader' => [
         'enabled' => false,
         'img' => [
-            'path' => 'images/logo.png',
+            'path' => 'images/logo.jpg',
             'alt' => 'Marva Preloader Image',
             'effect' => 'animation_shake',
             'width' => 60,

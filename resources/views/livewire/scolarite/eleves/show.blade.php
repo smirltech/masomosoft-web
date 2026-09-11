@@ -199,9 +199,10 @@
                                                 <span class="float-right">{{$eleve->responsable_eleve?->relation?->label()??''}}
                                                     @can('eleves.update',$eleve)
                                                         <span
-                                                            title="Modifier" role="button" class=" fa fa-link ml-1"
+                                                            title="Modifier" role="button" class="ml-1"
                                                             data-toggle="modal"
                                                             data-target="#edit-relation-modal">
+                                                            <img src="{{ asset('images/logo.jpg') }}" alt="logo" style="width: 1em; height: 1em; object-fit: contain; vertical-align: -0.125em;">
                                                     </span>
                                                     @endcan
                                                 </span>
