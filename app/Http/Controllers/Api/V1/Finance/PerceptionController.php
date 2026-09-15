@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers\Api\V1\Finance;
 
+use App\Enums\Devise;
 use App\Http\Controllers\Controller;
 use App\Models\Annee;
 use App\Models\Eleve;
@@ -10,6 +11,9 @@ use Illuminate\Http\JsonResponse;
 
 class PerceptionController extends Controller
 {
+    /**
+     * Liste des perceptions
+     */
     public function index(): JsonResponse
     {
         $perceptions = Perception::with([
@@ -22,14 +26,6 @@ class PerceptionController extends Controller
         return response()->json([
             'data' => $perceptions->map(function (Perception $perception) {
 
-                /*
-                |--------------------------------------------------------------------------
-                | ELEVE
-                |--------------------------------------------------------------------------
-                | On récupère l'élève directement grâce à eleve_id
-                |--------------------------------------------------------------------------
-                */
-
                 $eleve = null;
 
                 if ($perception->inscription?->eleve_id) {
@@ -39,13 +35,6 @@ class PerceptionController extends Controller
                 }
 
                 return [
-
-                    /*
-                    |--------------------------------------------------------------------------
-                    | PERCEPTION
-                    |--------------------------------------------------------------------------
-                    */
-
                     'id' => $perception->id,
 
                     'reference' => $perception->reference,
@@ -59,11 +48,9 @@ class PerceptionController extends Controller
 
                     'created_at' => $perception->created_at?->toISOString(),
 
-                    /*
-                    |--------------------------------------------------------------------------
-                    | ELEVE
-                    |--------------------------------------------------------------------------
-                    */
+                    // =============================================
+                    // ELEVE
+                    // =============================================
 
                     'eleve' => $eleve
                         ? [
@@ -80,11 +67,9 @@ class PerceptionController extends Controller
                         ]
                         : null,
 
-                    /*
-                    |--------------------------------------------------------------------------
-                    | CLASSE
-                    |--------------------------------------------------------------------------
-                    */
+                    // =============================================
+                    // CLASSE
+                    // =============================================
 
                     'classe' => $perception->inscription?->classe
                         ? [
@@ -93,11 +78,9 @@ class PerceptionController extends Controller
                         ]
                         : null,
 
-                    /*
-                    |--------------------------------------------------------------------------
-                    | FRAIS
-                    |--------------------------------------------------------------------------
-                    */
+                    // =============================================
+                    // FRAIS
+                    // =============================================
 
                     'frais' => $perception->frais
                         ? [
@@ -114,6 +97,9 @@ class PerceptionController extends Controller
     }
 
 
+    /**
+     * Total des perceptions par frais
+     */
     public function byFee(): JsonResponse
     {
         $annee = Annee::encours();
@@ -130,14 +116,43 @@ class PerceptionController extends Controller
 
                 return [
                     'frais_id' => $frais?->id,
+
                     'frais' => $frais?->nom,
+
                     'devise' => $frais?->devise?->value
                         ?? $frais?->devise,
+
                     'total' => (float) $items->sum('montant'),
+
                     'nombre_paiements' => $items->count(),
                 ];
 
             })->values(),
+        ]);
+    }
+
+
+    /**
+     * Total des perceptions en USD et CDF
+     */
+    public function total(): JsonResponse
+    {
+        $annee = Annee::encours();
+
+        $usd = Perception::where('annee_id', $annee->id)
+            ->where('devise', Devise::USD)
+            ->sum('montant');
+
+        $cdf = Perception::where('annee_id', $annee->id)
+            ->where('devise', Devise::CDF)
+            ->sum('montant');
+
+        return response()->json([
+            'data' => [
+                'annee_id' => $annee->id,
+                'usd' => (float) $usd,
+                'cdf' => (float) $cdf,
+            ],
         ]);
     }
 }

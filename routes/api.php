@@ -36,6 +36,11 @@ Route::prefix('v1')->group(function () {
             [CaisseController::class, 'pay']
         )->name('api.v1.finance.caisse.pay');
     });
+    Route::get(
+        '/finance/perceptions',
+        [PerceptionController::class, 'index']
+    );
+
 
     Route::get(
         '/finance/perceptions',
@@ -43,6 +48,16 @@ Route::prefix('v1')->group(function () {
     );
 
     Route::get(
+        '/finance/perceptions/total',
+        [PerceptionController::class, 'total']
+    );
+
+    Route::get(
+        '/finance/perceptions/by-fee',
+        [PerceptionController::class, 'byFee']
+    );
+
+    Route::get(
         '/finance/students/total',
         [StudentController::class, 'total']
     );
@@ -52,15 +67,9 @@ Route::prefix('v1')->group(function () {
         [StudentController::class, 'byClass']
     );
 
-    Route::get(
-        '/finance/students/total',
-        [StudentController::class, 'total']
-    );
 
-    Route::get(
-        '/finance/students/by-class',
-        [StudentController::class, 'byClass']
-    );
+
+
 
 
 });
