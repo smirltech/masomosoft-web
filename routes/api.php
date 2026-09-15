@@ -8,6 +8,8 @@ use App\Http\Controllers\Api\V1\Finance\CaisseController;
 use App\Http\Controllers\Api\V1\Finance\PerceptionClasseController;
 use App\Http\Controllers\Api\V1\Finance\PerceptionController;
 use App\Http\Controllers\Api\V1\Finance\StudentController;
+use App\Http\Controllers\Api\V1\Finance\RevenueController;
+use App\Http\Controllers\Api\V1\Finance\PaymentController;
 use App\Http\Controllers\Api\V1\Scolarite\EleveController;
 use Illuminate\Support\Facades\Route;
 
@@ -25,6 +27,12 @@ Route::prefix('v1')->group(function () {
 
         Route::get('/scolarite/eleves', [EleveController::class, 'index'])
             ->name('api.v1.scolarite.eleves.index');
+        Route::get('/students', [EleveController::class, 'index'])
+            ->name('api.v1.students.index');
+        Route::get('/revenues', [RevenueController::class, 'index'])
+            ->name('api.v1.revenues.index');
+        Route::post('/payments', [PaymentController::class, 'store'])
+            ->name('api.v1.payments.store');
 
         Route::post(
             '/finance/perceptions/classe',
