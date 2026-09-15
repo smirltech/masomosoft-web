@@ -16,10 +16,13 @@ class PerceptionController extends Controller
      */
     public function index(): JsonResponse
     {
+        $annee = Annee::encours();
+
         $perceptions = Perception::with([
             'frais',
             'inscription.classe',
         ])
+            ->where('annee_id', $annee->id)
             ->latest()
             ->get();
 
@@ -36,9 +39,7 @@ class PerceptionController extends Controller
 
                 return [
                     'id' => $perception->id,
-
                     'reference' => $perception->reference,
-
                     'montant' => (float) $perception->montant,
 
                     'devise' => $perception->devise?->value
@@ -47,10 +48,6 @@ class PerceptionController extends Controller
                     'due_date' => $perception->due_date,
 
                     'created_at' => $perception->created_at?->toISOString(),
-
-                    // =============================================
-                    // ELEVE
-                    // =============================================
 
                     'eleve' => $eleve
                         ? [
@@ -67,20 +64,12 @@ class PerceptionController extends Controller
                         ]
                         : null,
 
-                    // =============================================
-                    // CLASSE
-                    // =============================================
-
                     'classe' => $perception->inscription?->classe
                         ? [
                             'id' => $perception->inscription->classe->id,
                             'code' => $perception->inscription->classe->code,
                         ]
                         : null,
-
-                    // =============================================
-                    // FRAIS
-                    // =============================================
 
                     'frais' => $perception->frais
                         ? [
@@ -95,7 +84,6 @@ class PerceptionController extends Controller
             }),
         ]);
     }
-
 
     /**
      * Total des perceptions par frais
