@@ -52,6 +52,16 @@ Route::prefix('v1')->group(function () {
         [StudentController::class, 'byClass']
     );
 
+    Route::get(
+        '/finance/students/total',
+        [StudentController::class, 'total']
+    );
+
+    Route::get(
+        '/finance/students/by-class',
+        [StudentController::class, 'byClass']
+    );
+
 
 });
 

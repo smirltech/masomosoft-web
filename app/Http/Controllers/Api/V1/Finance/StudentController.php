@@ -38,6 +38,7 @@ class StudentController extends Controller
 
         $classes = Inscription::with('classe')
             ->where('annee_id', $annee->id)
+
             ->get()
             ->groupBy('classe_id');
 
@@ -51,6 +52,7 @@ class StudentController extends Controller
                     'total_eleves' => $inscriptions->count(),
                 ];
             })->values(),
+
         ]);
     }
 }

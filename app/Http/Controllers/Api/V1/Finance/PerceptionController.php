@@ -113,6 +113,7 @@ class PerceptionController extends Controller
         ]);
     }
 
+
     public function byFee(): JsonResponse
     {
         $annee = Annee::encours();
