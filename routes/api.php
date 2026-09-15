@@ -36,21 +36,24 @@ Route::prefix('v1')->group(function () {
             [CaisseController::class, 'pay']
         )->name('api.v1.finance.caisse.pay');
     });
-
     Route::get(
         '/finance/perceptions',
         [PerceptionController::class, 'index']
     );
 
     Route::get(
-        '/finance/students/total',
-        [StudentController::class, 'total']
+        '/finance/perceptions/total',
+        [PerceptionController::class, 'total']
     );
 
     Route::get(
-        '/finance/students/by-class',
-        [StudentController::class, 'byClass']
+        '/finance/perceptions/by-fee',
+        [PerceptionController::class, 'byFee']
     );
+
+    // =================================================
+    // FINANCE - STUDENTS
+    // =================================================
 
     Route::get(
         '/finance/students/total',
