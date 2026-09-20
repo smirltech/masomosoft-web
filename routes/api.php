@@ -44,6 +44,7 @@ Route::prefix('v1')->group(function () {
             [CaisseController::class, 'pay']
         )->name('api.v1.finance.caisse.pay');
     });
+
     Route::get(
         '/finance/perceptions',
         [PerceptionController::class, 'index']
