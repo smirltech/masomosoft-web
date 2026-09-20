@@ -61,8 +61,8 @@ Route::prefix('v1')->group(function () {
     );
 
     Route::get(
-        '/finance/students/total',
-        [StudentController::class, 'total']
+        '/students/count-by-class',
+        [StudentController::class, 'studentCountByClass']
     );
 
     Route::get(
