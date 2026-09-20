@@ -70,6 +70,7 @@ Route::prefix('v1')->group(function () {
         [StudentController::class, 'byClass']
     );
 
+
     Route::get(
         '/finance/students/insolvables',
         [StudentController::class, 'insolvables']
