@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Api\V1\Finance;
 use App\Enums\Devise;
 use App\Http\Controllers\Controller;
 use App\Models\Annee;
+use App\Models\Frais;
 use App\Models\Inscription;
 use App\Models\Perception;
 use Illuminate\Http\JsonResponse;
@@ -65,6 +66,8 @@ class StudentController extends Controller
         ]);
     }
 
+
+
     public function insolvables(Request $request): JsonResponse
     {
         $annee = Annee::encours();
@@ -74,6 +77,10 @@ class StudentController extends Controller
         $fraisId = $request->input('frais_id');
         $month = $request->input('month');
 
+
+        $frais = $fraisId
+            ? Frais::find($fraisId)
+            : null;
 
         $perceptionQuery = Perception::query()
             ->where('annee_id', $annee->id)
@@ -103,7 +110,8 @@ class StudentController extends Controller
             });
 
         $inscriptionIds = $perceptionQuery
-            ->pluck('inscription_id');
+            ->pluck('inscription_id')
+            ->unique();
 
 
 
@@ -127,6 +135,7 @@ class StudentController extends Controller
 
             ->get();
 
+
         return response()->json([
             'data' => [
                 'annee' => [
@@ -140,6 +149,16 @@ class StudentController extends Controller
                     'frais_id' => $fraisId,
                     'month' => $month,
                 ],
+
+                'frais' => $frais
+                    ? [
+                        'id' => $frais->id,
+                        'nom' => $frais->nom,
+                        'montant' => (float) $frais->montant,
+                        'devise' => $frais->devise?->value
+                            ?? $frais->devise,
+                    ]
+                    : null,
 
                 'total_insolvables' => $inscriptions->count(),
 
