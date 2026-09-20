@@ -137,7 +137,7 @@ class PerceptionController extends Controller
 
         return response()->json([
             'data' => [
-                'annee_id' => $annee->id,
+                'annee_id' => $annee->name,
                 'usd' => (float) $usd,
                 'cdf' => (float) $cdf,
             ],

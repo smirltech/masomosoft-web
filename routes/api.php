@@ -54,7 +54,6 @@ Route::prefix('v1')->group(function () {
         '/finance/perceptions/total',
         [PerceptionController::class, 'total']
     );
-
     Route::get(
         '/finance/perceptions/by-fee',
         [PerceptionController::class, 'byFee']
