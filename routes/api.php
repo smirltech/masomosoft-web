@@ -5,6 +5,7 @@ use App\Http\Controllers\Api\V1\AuthController;
 use App\Http\Controllers\Api\V1\ContextController;
 use App\Http\Controllers\Api\V1\DashboardController;
 use App\Http\Controllers\Api\V1\Finance\CaisseController;
+use App\Http\Controllers\Api\V1\Finance\ExpenseController;
 use App\Http\Controllers\Api\V1\Finance\PerceptionClasseController;
 use App\Http\Controllers\Api\V1\Finance\PerceptionController;
 use App\Http\Controllers\Api\V1\Finance\StudentController;
@@ -70,10 +71,7 @@ Route::prefix('v1')->group(function () {
         [StudentController::class, 'byClass']
     );
 
-    Route::get(
-        '/finance/students/insolvables',
-        [StudentController::class, 'insolvables']
-    );
+    Route::get('/finance/students/insolvables', [StudentController::class, 'insolvables']);
 
     Route::get(
         '/finance/expenses',
