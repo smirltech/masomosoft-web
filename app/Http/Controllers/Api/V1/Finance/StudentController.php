@@ -68,6 +68,7 @@ class StudentController extends Controller
 
 
 
+
     public function insolvables(Request $request): JsonResponse
     {
         $annee = Annee::encours();

@@ -71,14 +71,11 @@ Route::prefix('v1')->group(function () {
         [StudentController::class, 'byClass']
     );
 
+
     Route::get('/finance/students/insolvables', [StudentController::class, 'insolvables']);
 
-    Route::get(
-        '/finance/expenses',
-        [ExpenseController::class, 'index']
-    );
 
-
+    Route::get('/finance/expenses', [ExpenseController::class, 'index']);
 
 });
 
