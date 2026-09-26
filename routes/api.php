@@ -77,6 +77,7 @@ Route::prefix('v1')->group(function () {
     Route::get('
             /finance/expenses',
         [ExpenseController::class, 'index']
+
     );
 
 
