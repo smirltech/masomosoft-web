@@ -6,20 +6,37 @@ use App\Http\Controllers\Controller;
 use App\Models\Annee;
 use App\Models\Depense;
 use Illuminate\Http\JsonResponse;
+use Illuminate\Http\Request;
 
 class ExpenseController extends Controller
 {
-    public function index(): JsonResponse
+    public function index(Request $request): JsonResponse
     {
-        $annee = Annee::encours();
+        $dateDebut = $request->input('date_debut');
+        $dateFin = $request->input('date_fin');
 
-        $depenses = Depense::with('depenseType')
-            ->whereBetween('date', [$annee->date_debut, $annee->date_fin])
+        if (!$dateDebut || !$dateFin) {
+            $annee = Annee::encours();
+            $dateDebut = $dateDebut ?? $annee?->date_debut;
+            $dateFin = $dateFin ?? $annee?->date_fin;
+        }
+
+        $depenses = Depense::with('type')
+            ->when($dateDebut && $dateFin, function ($query) use ($dateDebut, $dateFin) {
+                $query->whereBetween('date', [$dateDebut, $dateFin]);
+            })
             ->latest('date')
             ->get();
 
         return response()->json([
-            'data' => $depenses,
+            'data' => [
+                'periode' => [
+                    'date_debut' => $dateDebut,
+                    'date_fin' => $dateFin,
+                ],
+                'total' => $depenses->count(),
+                'depenses' => $depenses,
+            ],
         ]);
     }
 }
