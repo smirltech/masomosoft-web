@@ -14,8 +14,8 @@ class ExpenseController extends Controller
         $annee = Annee::encours();
 
         $depenses = Depense::with('depenseType')
-            ->where('annee_id', $annee->id)
-            ->latest()
+            ->whereBetween('date', [$annee->date_debut, $annee->date_fin])
+            ->latest('date')
             ->get();
 
         return response()->json([
