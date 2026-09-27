@@ -10,7 +10,6 @@ use Illuminate\Http\Request;
 
 class ExpenseController extends Controller
 {
-
     public function index(Request $request): JsonResponse
     {
         $dateDebut = $request->input('date_debut');
@@ -29,14 +28,25 @@ class ExpenseController extends Controller
 
 
         $baseQuery
-            ->when($request->filled('type_id'), fn ($q) => $q->where('type_id', $request->input('type_id')))
-            ->when($request->filled('status'), fn ($q) => $q->where('statut', $request->input('status')))
+            ->when($request->filled('type_id'), fn ($q) => $q->where('depense_type_id', $request->input('type_id')))
+            ->when($request->filled('status'), function ($q) use ($request) {
+
+                $q->whereHas('statuses', function ($sub) use ($request) {
+                    $sub->where('name', $request->input('status'))
+                        ->whereIn('id', function ($inner) {
+                            $inner->selectRaw('MAX(id)')
+                                ->from('statuses')
+                                ->where('model_type', Depense::class)
+                                ->groupBy('model_id');
+                        });
+                });
+            })
             ->when($request->filled('search'), function ($q) use ($request) {
                 $search = $request->input('search');
                 $q->where(function ($sub) use ($search) {
-                    $sub->where('motif', 'like', "%{$search}%")
-                        ->orWhere('beneficiaire', 'like', "%{$search}%")
-                        ->orWhere('reference', 'like', "%{$search}%");
+                    $sub->where('reference', 'like', "%{$search}%")
+                        ->orWhere('motif', 'like', "%{$search}%")
+                        ->orWhere('beneficiaire', 'like', "%{$search}%");
                 });
             });
 
@@ -77,10 +87,8 @@ class ExpenseController extends Controller
         ]);
     }
 
-    /**
-     * GET /api/v1/finance/expenses/{id}
-     */
-    public function show(int $id): JsonResponse
+
+    public function show(string $id): JsonResponse
     {
         $depense = Depense::with('type')->findOrFail($id);
 
@@ -89,21 +97,23 @@ class ExpenseController extends Controller
         ]);
     }
 
-
     private function transform(Depense $depense): array
     {
         return [
             'id' => $depense->id,
-            'reference' => $depense->reference ?? (string) $depense->id,
-            'description' => $depense->motif ?? $depense->description ?? null,
-            'type' => $depense->type?->nom ?? $depense->type?->libelle ?? $depense->type_libelle ?? null,
-            'beneficiary' => $depense->beneficiaire ?? $depense->beneficiary ?? null,
+            'reference' => $depense->reference,
+            'description' => $depense->motif,
+            'category' => $depense->categorie?->value,
+            'type' => $depense->type?->nom,
+            'beneficiary' => $depense->beneficiaire,
             'amount' => (float) $depense->montant,
-            'currency' => $depense->devise ?? $depense->currency ?? null,
-            'date' => $depense->date instanceof \Carbon\Carbon
-                ? $depense->date->format('Y-m-d')
-                : $depense->date,
-            'status' => $depense->statut ?? $depense->status ?? null,
+            'currency' => $depense->devise?->value,
+            'date' => optional($depense->date)->format('Y-m-d'),
+            'status' => $depense->status(),
+            'note' => $depense->note,
+            'validated_at' => optional($depense->validated_at)->toDateTimeString(),
+            'created_by' => $depense->user?->name,
+            'created_at' => optional($depense->created_at)->toDateTimeString(),
         ];
     }
 }
