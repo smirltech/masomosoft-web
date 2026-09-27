@@ -77,6 +77,8 @@ Route::prefix('v1')->group(function () {
 //    Route::get('/finance/expenses', [ExpenseController::class, 'index']);
 
 
+
+
     Route::prefix('v1/finance')->group(function () {
         Route::get('expenses', [ExpenseController::class, 'index']);
         Route::get('expenses/{id}', [ExpenseController::class, 'show']);
