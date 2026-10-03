@@ -36,6 +36,7 @@ Route::prefix('v1')->group(function () {
         Route::post('/payments', [PaymentController::class, 'store'])
             ->name('api.v1.payments.store');
 
+
         Route::post(
             '/finance/perceptions/classe',
             [PerceptionClasseController::class, 'store']
