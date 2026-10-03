@@ -6,12 +6,14 @@ use App\Http\Controllers\Controller;
 use App\Models\Annee;
 use App\Models\School;
 use Illuminate\Http\JsonResponse;
+use Illuminate\Http\Request;
 
 class ContextController extends Controller
 {
-    public function index(): JsonResponse
+    public function index(Request $request): JsonResponse
     {
         $school = School::first();
+        $user = $request->user();
 
         return response()->json([
             'data' => [
@@ -29,23 +31,41 @@ class ContextController extends Controller
 
                 'academic_year' => $this->getCurrentAcademicYear(),
 
-                'currencies' => [
+                'supported_currencies' => [
                     'USD',
                     'CDF',
                 ],
+
+                'device' => $this->getDevice($request),
+
+                'permissions' => $this->getPermissions($user),
             ],
         ]);
     }
-
     private function getCurrentAcademicYear(): ?array
     {
-        /*
-         * Connect this to the existing Annee model
-         * and its existing "current academic year" logic.
-         *
-         * We intentionally don't assume field names here.
-         */
 
         return Annee::encours()->toArray();
+    }
+    private function getDevice(Request $request): array
+    {
+
+        return [
+            'device_id' => $request->header('X-Device-Id', $request->query('device_id')),
+            'device_name' => $request->header('X-Device-Name', $request->query('device_name')),
+            'registered' => true,
+        ];
+    }
+
+    private function getPermissions($user): array
+    {
+        if (! $user) {
+            return [];
+        }
+
+        return $user->getAllPermissions()
+            ->pluck('name')
+            ->values()
+            ->all();
     }
 }

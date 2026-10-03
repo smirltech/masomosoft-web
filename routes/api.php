@@ -11,6 +11,7 @@ use App\Http\Controllers\Api\V1\Finance\PerceptionController;
 use App\Http\Controllers\Api\V1\Finance\StudentController;
 use App\Http\Controllers\Api\V1\Finance\RevenueController;
 use App\Http\Controllers\Api\V1\Finance\PaymentController;
+use App\Http\Controllers\Api\V1\Pos\PosStudentController;
 use App\Http\Controllers\Api\V1\ReportController;
 use App\Http\Controllers\Api\V1\Scolarite\EleveController;
 use Illuminate\Support\Facades\Route;
@@ -24,6 +25,20 @@ Route::prefix('v1')->group(function () {
         Route::get('/auth/me', [AuthController::class, 'me']);
 
         Route::get('/context', [ContextController::class, 'index']);
+
+        Route::prefix('v1/pos')->group(function () {
+
+            Route::get(
+                '/students/{identifier}',
+                [PosStudentController::class, 'show']
+            )->name('api.v1.pos.students.show');
+
+            Route::get(
+                '/students/{identifier}/payment-context',
+                [PosStudentController::class, 'paymentContext']
+            )->name('api.v1.pos.students.payment-context');
+
+        });
 
         Route::get('/dashboard', [DashboardController::class, 'index']);
 
