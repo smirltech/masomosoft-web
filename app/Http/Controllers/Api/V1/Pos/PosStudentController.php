@@ -58,6 +58,7 @@ class PosStudentController extends Controller
             ->where('annee_id', $anneeId)
             ->first();
 
+
         if (!$inscription) {
             return response()->json([
                 'message' => 'Student is not registered for the current academic year.',
