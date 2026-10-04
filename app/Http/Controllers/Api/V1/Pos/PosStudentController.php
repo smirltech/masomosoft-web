@@ -5,7 +5,9 @@ namespace App\Http\Controllers\Api\V1\Pos;
 use App\Http\Controllers\Controller;
 use App\Models\Annee;
 use App\Models\Eleve;
+use App\Models\Frais;
 use App\Models\Perception;
+use Carbon\Carbon;
 use Illuminate\Http\JsonResponse;
 
 class PosStudentController extends Controller
@@ -37,6 +39,7 @@ class PosStudentController extends Controller
 
     public function paymentContext(string $identifier): JsonResponse
     {
+
         $student = $this->findStudent($identifier);
 
         if (! $student) {
@@ -55,102 +58,195 @@ class PosStudentController extends Controller
         if (! $inscription) {
             return response()->json([
                 'message' => 'Student is not registered for the current academic year.',
+
                 'student' => [
                     'id' => $student->id,
                     'name' => $this->studentName($student),
                     'matricule' => $student->matricule,
                 ],
+
                 'annee_id' => $anneeId,
             ], 422);
         }
+
+        $fees = Frais::query()
+            ->where(function ($query) use ($anneeId) {
+                $query
+                    ->where('annee_id', $anneeId)
+                    ->orWhereNull('annee_id');
+            })
+            ->orderBy('nom')
+            ->get();
 
         $perceptions = Perception::query()
             ->where('inscription_id', $inscription->id)
             ->where('annee_id', $anneeId)
             ->where('montant', '>', 0)
-            ->with('frais')
-            ->orderByDesc('paid_at')
-            ->orderByDesc('created_at')
             ->get();
 
-        $paymentsData = [];
 
+        $paidByFee = $perceptions
+            ->groupBy('frais_id')
+            ->map(function ($items) {
+                return $items->sum(function ($perception) {
+                    return (float) $perception->montant;
+                });
+            });
+
+
+        $totalDueUSD = 0;
         $totalPaidUSD = 0;
+
+        $totalDueCDF = 0;
         $totalPaidCDF = 0;
 
-        foreach ($perceptions as $perception) {
+        $feesData = [];
 
-            $amountPaid = (float) $perception->montant;
 
-            $currency = $perception->devise;
+        foreach ($fees as $fee) {
 
-            if ($currency instanceof \BackedEnum) {
-                $currency = $currency->value;
-            }
 
-            $currency = $currency ?: $perception->frais?->devise;
+            $amountDue = (float) $fee->montant;
 
-            if ($currency instanceof \BackedEnum) {
-                $currency = $currency->value;
-            }
+
+            $currency = $this->enumValue($fee->devise);
 
             $currency = $currency ?: 'USD';
 
-            if ($currency === 'USD') {
-                $totalPaidUSD += $amountPaid;
+
+            $amountPaid = (float) ($paidByFee->get($fee->id) ?? 0);
+
+
+            $outstanding = max(
+                $amountDue - $amountPaid,
+                0
+            );
+
+
+
+            if ($amountPaid <= 0) {
+
+                $status = 'unpaid';
+
+            } elseif ($amountPaid < $amountDue) {
+
+                $status = 'partial';
+
+            } else {
+
+                $status = 'paid';
             }
 
-            if ($currency === 'CDF') {
+
+
+            if ($currency === 'USD') {
+
+                $totalDueUSD += $amountDue;
+
+                $totalPaidUSD += $amountPaid;
+
+            } elseif ($currency === 'CDF') {
+
+                $totalDueCDF += $amountDue;
+
                 $totalPaidCDF += $amountPaid;
             }
 
+            $feesData[] = [
 
-            $paymentsData[] = [
-                'id' => $perception->id,
-                'reference' => $perception->reference,
+                'id' => $fee->id,
 
-                'fee' => [
-                    'id' => $perception->frais?->id,
-                    'name' => $perception->frais?->nom,
-                    'type' => $perception->frais?->type?->value,
-                ],
+                'name' => $fee->nom,
 
-                'amount' => $amountPaid,
+                'period' => $this->enumValue(
+                    $fee->frequence
+                ),
+
+                'amount_due' => $amountDue,
+
+                'amount_paid' => $amountPaid,
+
+                'outstanding' => $outstanding,
+
+                'status' => $status,
 
                 'currency' => $currency,
-
-                'paid_by' => $perception->paid_by,
-
-                'paid_at' => $perception->paid_at?->format('Y-m-d H:i:s'),
-
-                'due_date' => $perception->due_date?->format('Y-m-d'),
-
-                'created_at' => $perception->created_at?->format('Y-m-d H:i:s'),
             ];
         }
 
+        $currencies = collect($feesData)
+            ->pluck('currency')
+            ->unique()
+            ->values();
 
-        return response()->json([
-            'student' => [
-                'id' => $student->id,
-                'name' => $this->studentName($student),
-                'matricule' => $student->matricule,
-                'class' => $inscription->classe?->code,
-            ],
+        if ($currencies->count() === 1) {
 
-            'financial' => [
+            $currency = $currencies->first();
+
+            if ($currency === 'CDF') {
+
+                $amountDue = $totalDueCDF;
+                $amountPaid = $totalPaidCDF;
+
+            } else {
+
+                $amountDue = $totalDueUSD;
+                $amountPaid = $totalPaidUSD;
+            }
+
+            $financial = [
+                'currency' => $currency,
+
+                'amount_due' => $amountDue,
+
+                'amount_paid' => $amountPaid,
+
+                'outstanding' => max(
+                    $amountDue - $amountPaid,
+                    0
+                ),
+            ];
+
+        } else {
+
+
+            $financial = [
                 'USD' => [
+                    'amount_due' => $totalDueUSD,
                     'amount_paid' => $totalPaidUSD,
+                    'outstanding' => max(
+                        $totalDueUSD - $totalPaidUSD,
+                        0
+                    ),
                 ],
 
                 'CDF' => [
+                    'amount_due' => $totalDueCDF,
                     'amount_paid' => $totalPaidCDF,
+                    'outstanding' => max(
+                        $totalDueCDF - $totalPaidCDF,
+                        0
+                    ),
                 ],
+            ];
+        }
 
-                'total_payments' => $perceptions->count(),
+        return response()->json([
+
+            'student' => [
+
+                'id' => $student->id,
+
+                'name' => $this->studentName($student),
+
+                'matricule' => $student->matricule,
+
+                'class' => $inscription->classe?->code,
             ],
 
-            'payments' => $paymentsData,
+            'financial' => $financial,
+
+            'fees' => $feesData,
         ]);
     }
 
@@ -158,10 +254,12 @@ class PosStudentController extends Controller
     {
         return Eleve::query()
             ->where(function ($query) use ($identifier) {
+
                 $query
                     ->where('matricule', $identifier)
                     ->orWhere('numero_permanent', $identifier)
                     ->orWhere('id', $identifier);
+
             })
             ->first();
     }
@@ -169,5 +267,39 @@ class PosStudentController extends Controller
     private function studentName(Eleve $student): string
     {
         return trim($student->nom);
+    }
+    private function enumValue(mixed $value): mixed
+    {
+        if ($value instanceof \BackedEnum) {
+            return $value->value;
+        }
+
+        return $value;
+    }
+
+    private function formatDateTime(mixed $value): ?string
+    {
+        if (! $value) {
+            return null;
+        }
+
+        if ($value instanceof \DateTimeInterface) {
+            return $value->format('Y-m-d H:i:s');
+        }
+
+        return Carbon::parse($value)->format('Y-m-d H:i:s');
+    }
+
+    private function formatDate(mixed $value): ?string
+    {
+        if (! $value) {
+            return null;
+        }
+
+        if ($value instanceof \DateTimeInterface) {
+            return $value->format('Y-m-d');
+        }
+
+        return Carbon::parse($value)->format('Y-m-d');
     }
 }
