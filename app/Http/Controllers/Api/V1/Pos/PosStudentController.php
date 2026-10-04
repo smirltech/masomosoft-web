@@ -10,7 +10,9 @@ use Illuminate\Http\JsonResponse;
 
 class PosStudentController extends Controller
 {
-
+    /**
+     * Rechercher un élève.
+     */
     public function show(string $identifier): JsonResponse
     {
         $student = $this->findStudent($identifier);
@@ -22,7 +24,7 @@ class PosStudentController extends Controller
         }
 
         $inscription = $student->inscriptions()
-            ->with(['classe'])
+            ->with('classe')
             ->where('annee_id', Annee::id())
             ->first();
 
@@ -36,6 +38,10 @@ class PosStudentController extends Controller
         ]);
     }
 
+    /**
+     * Afficher toutes les perceptions payées
+     * par l'élève pendant l'année scolaire courante.
+     */
     public function paymentContext(string $identifier): JsonResponse
     {
         $student = $this->findStudent($identifier);
@@ -48,6 +54,12 @@ class PosStudentController extends Controller
 
         $anneeId = Annee::id();
 
+        /*
+        |--------------------------------------------------------------------------
+        | Inscription de l'élève pour l'année courante
+        |--------------------------------------------------------------------------
+        */
+
         $inscription = $student->inscriptions()
             ->with('classe')
             ->where('annee_id', $anneeId)
@@ -56,65 +68,108 @@ class PosStudentController extends Controller
         if (! $inscription) {
             return response()->json([
                 'message' => 'Student is not registered for the current academic year.',
+                'student' => [
+                    'id' => $student->id,
+                    'name' => $this->studentName($student),
+                    'matricule' => $student->matricule,
+                ],
+                'annee_id' => $anneeId,
             ], 422);
         }
 
-        $fees = \App\Models\Frais::query()
-            ->where('annee_id', $anneeId)
-            ->get();
+        /*
+        |--------------------------------------------------------------------------
+        | Toutes les perceptions payées de l'élève
+        |--------------------------------------------------------------------------
+        */
 
         $perceptions = Perception::query()
             ->where('inscription_id', $inscription->id)
             ->where('annee_id', $anneeId)
+            ->where('montant', '>', 0)
             ->with('frais')
+            ->orderByDesc('paid_at')
+            ->orderByDesc('created_at')
             ->get();
 
-        $feesData = [];
-        $totalDue = 0;
-        $totalPaid = 0;
+        /*
+        |--------------------------------------------------------------------------
+        | Préparation des données
+        |--------------------------------------------------------------------------
+        */
 
-        foreach ($fees as $fee) {
-            $amountDue = (float) $fee->montant;
+        $paymentsData = [];
 
-            $payments = $perceptions->where('frais_id', $fee->id);
-            $amountPaid = (float) $payments->sum('montant');
+        $totalPaidUSD = 0;
+        $totalPaidCDF = 0;
 
-            $outstanding = max(0, $amountDue - $amountPaid);
+        foreach ($perceptions as $perception) {
 
-            $totalDue += $amountDue;
-            $totalPaid += $amountPaid;
+            $amountPaid = (float) $perception->montant;
 
-            $period = null;
+            $currency = $perception->devise;
 
-            if ($fee->frequence !== null) {
-                if (method_exists($fee->frequence, 'label')) {
-                    $period = $fee->frequence->label();
-                } elseif (isset($fee->frequence->value)) {
-                    $period = $fee->frequence->value;
-                } else {
-                    $period = (string) $fee->frequence;
-                }
+            if ($currency instanceof \BackedEnum) {
+                $currency = $currency->value;
             }
 
-            $status = match (true) {
-                $amountPaid <= 0 => 'unpaid',
-                $outstanding <= 0 => 'paid',
-                default => 'partial',
-            };
+            $currency = $currency ?: $perception->frais?->devise;
 
-            $feesData[] = [
-                'id' => $fee->id,
-                'name' => $fee->nom,
-                'period' => $period,
-                'amount_due' => $amountDue,
-                'amount_paid' => $amountPaid,
-                'outstanding' => $outstanding,
-                'status' => $status,
-                'currency' => $fee->devise?->value,
+            if ($currency instanceof \BackedEnum) {
+                $currency = $currency->value;
+            }
+
+            $currency = $currency ?: 'USD';
+
+            /*
+            |--------------------------------------------------------------------------
+            | Totaux par devise
+            |--------------------------------------------------------------------------
+            */
+
+            if ($currency === 'USD') {
+                $totalPaidUSD += $amountPaid;
+            }
+
+            if ($currency === 'CDF') {
+                $totalPaidCDF += $amountPaid;
+            }
+
+            /*
+            |--------------------------------------------------------------------------
+            | Perception
+            |--------------------------------------------------------------------------
+            */
+
+            $paymentsData[] = [
+                'id' => $perception->id,
+                'reference' => $perception->reference,
+
+                'fee' => [
+                    'id' => $perception->frais?->id,
+                    'name' => $perception->frais?->nom,
+                    'type' => $perception->frais?->type?->value,
+                ],
+
+                'amount' => $amountPaid,
+
+                'currency' => $currency,
+
+                'paid_by' => $perception->paid_by,
+
+                'paid_at' => $perception->paid_at?->format('Y-m-d H:i:s'),
+
+                'due_date' => $perception->due_date?->format('Y-m-d'),
+
+                'created_at' => $perception->created_at?->format('Y-m-d H:i:s'),
             ];
         }
 
-        $outstanding = max(0, $totalDue - $totalPaid);
+        /*
+        |--------------------------------------------------------------------------
+        | Réponse
+        |--------------------------------------------------------------------------
+        */
 
         return response()->json([
             'student' => [
@@ -125,26 +180,40 @@ class PosStudentController extends Controller
             ],
 
             'financial' => [
-                'currency' => 'USD',
-                'amount_due' => $totalDue,
-                'amount_paid' => $totalPaid,
-                'outstanding' => $outstanding,
+                'USD' => [
+                    'amount_paid' => $totalPaidUSD,
+                ],
+
+                'CDF' => [
+                    'amount_paid' => $totalPaidCDF,
+                ],
+
+                'total_payments' => $perceptions->count(),
             ],
 
-            'fees' => $feesData,
+            'payments' => $paymentsData,
         ]);
     }
 
+    /**
+     * Trouver un élève par matricule,
+     * numéro permanent ou ID.
+     */
     private function findStudent(string $identifier): ?Eleve
     {
         return Eleve::query()
             ->where(function ($query) use ($identifier) {
-                $query->where('matricule', $identifier)
+                $query
+                    ->where('matricule', $identifier)
                     ->orWhere('numero_permanent', $identifier)
                     ->orWhere('id', $identifier);
             })
             ->first();
     }
+
+    /**
+     * Nom de l'élève.
+     */
     private function studentName(Eleve $student): string
     {
         return trim($student->nom);
