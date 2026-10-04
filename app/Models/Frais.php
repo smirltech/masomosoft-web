@@ -127,18 +127,18 @@ class Frais extends Model implements \OwenIt\Auditing\Contracts\Auditable
         return $this->belongsTo(Option::class);
     }
 
-    public function getClassableAttribute(): mixed
-    {
-        if (str_ends_with($this->classable_type, 'Classe')) {
-            return Classe::find($this->classable_id);
-        } elseif (str_ends_with($this->classable_type, 'Option')) {
-            return Option::find($this->classable_id);
-        } elseif (str_ends_with($this->classable_type, 'Option')) {
-            return Option::find($this->classable_id);
-        } elseif (str_ends_with($this->classable_type, 'Section')) {
-            return Section::find($this->classable_id);
-        } else {
-            return null;
-        }
-    }
+//    public function getClassableAttribute(): mixed
+//    {
+//        if (str_ends_with($this->classable_type, 'Classe')) {
+//            return Classe::find($this->classable_id);
+//        } elseif (str_ends_with($this->classable_type, 'Option')) {
+//            return Option::find($this->classable_id);
+//        } elseif (str_ends_with($this->classable_type, 'Option')) {
+//            return Option::find($this->classable_id);
+//        } elseif (str_ends_with($this->classable_type, 'Section')) {
+//            return Section::find($this->classable_id);
+//        } else {
+//            return null;
+//        }
+//    }
 }
