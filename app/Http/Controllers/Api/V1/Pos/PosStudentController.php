@@ -53,9 +53,7 @@ class PosStudentController extends Controller
         $anneeId = Annee::id();
 
         $inscription = $student->inscriptions()
-            ->with([
-                'classe',
-            ])
+            ->with('classe')
             ->where('annee_id', $anneeId)
             ->first();
 
@@ -65,10 +63,9 @@ class PosStudentController extends Controller
             ], 422);
         }
 
+
         $fees = \App\Models\Frais::query()
-            ->whereHas('classable', function ($query) use ($inscription) {
-                $query->whereKey($inscription->classe_id);
-            })
+            ->where('annee_id', $anneeId)
             ->get();
 
         $perceptions = Perception::query()
@@ -86,8 +83,7 @@ class PosStudentController extends Controller
 
             $amountDue = (float) $fee->montant;
 
-            $payments = $perceptions
-                ->where('frais_id', $fee->id);
+            $payments = $perceptions->where('frais_id', $fee->id);
 
             $amountPaid = (float) $payments->sum('montant');
 
@@ -101,10 +97,15 @@ class PosStudentController extends Controller
 
             $period = null;
 
-            if ($fee->frequence) {
-                $period = method_exists($fee->frequence, 'label')
-                    ? $fee->frequence->label()
-                    : $fee->frequence->value;
+            if ($fee->frequence !== null) {
+
+                if (method_exists($fee->frequence, 'label')) {
+                    $period = $fee->frequence->label();
+                } elseif (isset($fee->frequence->value)) {
+                    $period = $fee->frequence->value;
+                } else {
+                    $period = (string) $fee->frequence;
+                }
             }
 
             $status = match (true) {
@@ -121,6 +122,7 @@ class PosStudentController extends Controller
                 'amount_paid' => $amountPaid,
                 'outstanding' => $outstanding,
                 'status' => $status,
+                'currency' => $fee->devise?->value,
             ];
         }
 
@@ -147,7 +149,6 @@ class PosStudentController extends Controller
             'fees' => $feesData,
         ]);
     }
-
     private function findStudent(string $identifier): ?Eleve
     {
         return Eleve::query()
