@@ -11,6 +11,7 @@ use App\Http\Controllers\Api\V1\Finance\PerceptionController;
 use App\Http\Controllers\Api\V1\Finance\StudentController;
 use App\Http\Controllers\Api\V1\Finance\RevenueController;
 use App\Http\Controllers\Api\V1\Finance\PaymentController;
+use App\Http\Controllers\Api\V1\Pos\PosPaymentController;
 use App\Http\Controllers\Api\V1\Pos\PosStudentController;
 use App\Http\Controllers\Api\V1\ReportController;
 use App\Http\Controllers\Api\V1\Scolarite\EleveController;
@@ -39,6 +40,10 @@ Route::prefix('v1')->group(function () {
                 [PosStudentController::class, 'paymentContext']
             )->name('api.v1.pos.students.payment-context');
 
+            Route::post('/payments', [
+                PosPaymentController::class,
+                'store'
+            ])->name('api.v1.pos.payments.store');
 
         });
 
