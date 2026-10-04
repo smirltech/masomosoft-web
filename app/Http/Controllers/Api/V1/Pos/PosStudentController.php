@@ -10,9 +10,6 @@ use Illuminate\Http\JsonResponse;
 
 class PosStudentController extends Controller
 {
-    /**
-     * Rechercher un élève.
-     */
     public function show(string $identifier): JsonResponse
     {
         $student = $this->findStudent($identifier);
@@ -38,10 +35,6 @@ class PosStudentController extends Controller
         ]);
     }
 
-    /**
-     * Afficher toutes les perceptions payées
-     * par l'élève pendant l'année scolaire courante.
-     */
     public function paymentContext(string $identifier): JsonResponse
     {
         $student = $this->findStudent($identifier);
@@ -53,12 +46,6 @@ class PosStudentController extends Controller
         }
 
         $anneeId = Annee::id();
-
-        /*
-        |--------------------------------------------------------------------------
-        | Inscription de l'élève pour l'année courante
-        |--------------------------------------------------------------------------
-        */
 
         $inscription = $student->inscriptions()
             ->with('classe')
@@ -77,12 +64,6 @@ class PosStudentController extends Controller
             ], 422);
         }
 
-        /*
-        |--------------------------------------------------------------------------
-        | Toutes les perceptions payées de l'élève
-        |--------------------------------------------------------------------------
-        */
-
         $perceptions = Perception::query()
             ->where('inscription_id', $inscription->id)
             ->where('annee_id', $anneeId)
@@ -91,12 +72,6 @@ class PosStudentController extends Controller
             ->orderByDesc('paid_at')
             ->orderByDesc('created_at')
             ->get();
-
-        /*
-        |--------------------------------------------------------------------------
-        | Préparation des données
-        |--------------------------------------------------------------------------
-        */
 
         $paymentsData = [];
 
@@ -121,12 +96,6 @@ class PosStudentController extends Controller
 
             $currency = $currency ?: 'USD';
 
-            /*
-            |--------------------------------------------------------------------------
-            | Totaux par devise
-            |--------------------------------------------------------------------------
-            */
-
             if ($currency === 'USD') {
                 $totalPaidUSD += $amountPaid;
             }
@@ -135,11 +104,6 @@ class PosStudentController extends Controller
                 $totalPaidCDF += $amountPaid;
             }
 
-            /*
-            |--------------------------------------------------------------------------
-            | Perception
-            |--------------------------------------------------------------------------
-            */
 
             $paymentsData[] = [
                 'id' => $perception->id,
@@ -165,11 +129,6 @@ class PosStudentController extends Controller
             ];
         }
 
-        /*
-        |--------------------------------------------------------------------------
-        | Réponse
-        |--------------------------------------------------------------------------
-        */
 
         return response()->json([
             'student' => [
@@ -195,10 +154,6 @@ class PosStudentController extends Controller
         ]);
     }
 
-    /**
-     * Trouver un élève par matricule,
-     * numéro permanent ou ID.
-     */
     private function findStudent(string $identifier): ?Eleve
     {
         return Eleve::query()
@@ -211,9 +166,6 @@ class PosStudentController extends Controller
             ->first();
     }
 
-    /**
-     * Nom de l'élève.
-     */
     private function studentName(Eleve $student): string
     {
         return trim($student->nom);
