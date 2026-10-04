@@ -9,7 +9,7 @@ use Carbon\Carbon;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\HasMany;
-use Illuminate\Database\Eloquent\Relations\MorphTo;
+use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use OwenIt\Auditing\Auditable;
 
 class Frais extends Model implements \OwenIt\Auditing\Contracts\Auditable
@@ -118,9 +118,13 @@ class Frais extends Model implements \OwenIt\Auditing\Contracts\Auditable
         return $this->perceptions()->whereDate('created_at', '>=', $sdate)->whereDate('created_at', '<=', $edate)->sum('montant');
     }
 
-    public function classable(): MorphTo
+//    public function classable(): MorphTo
+//    {
+//        return $this->morphTo();
+//    }
+    public function option(): BelongsTo
     {
-        return $this->morphTo();
+        return $this->belongsTo(Option::class);
     }
 
     public function getClassableAttribute(): mixed
