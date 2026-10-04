@@ -7,7 +7,6 @@ use App\Models\Annee;
 use App\Models\Eleve;
 use App\Models\Perception;
 use Illuminate\Http\JsonResponse;
-use Illuminate\Http\Request;
 
 class PosStudentController extends Controller
 {
@@ -16,16 +15,14 @@ class PosStudentController extends Controller
     {
         $student = $this->findStudent($identifier);
 
-        if (!$student) {
+        if (! $student) {
             return response()->json([
                 'message' => 'Student not found.',
             ], 404);
         }
 
         $inscription = $student->inscriptions()
-            ->with([
-                'classe',
-            ])
+            ->with(['classe'])
             ->where('annee_id', Annee::id())
             ->first();
 
@@ -39,13 +36,11 @@ class PosStudentController extends Controller
         ]);
     }
 
-
-
     public function paymentContext(string $identifier): JsonResponse
     {
         $student = $this->findStudent($identifier);
 
-        if (!$student) {
+        if (! $student) {
             return response()->json([
                 'message' => 'Student not found.',
             ], 404);
@@ -58,13 +53,11 @@ class PosStudentController extends Controller
             ->where('annee_id', $anneeId)
             ->first();
 
-
-        if (!$inscription) {
+        if (! $inscription) {
             return response()->json([
                 'message' => 'Student is not registered for the current academic year.',
             ], 422);
         }
-
 
         $fees = \App\Models\Frais::query()
             ->where('annee_id', $anneeId)
@@ -77,22 +70,16 @@ class PosStudentController extends Controller
             ->get();
 
         $feesData = [];
-
         $totalDue = 0;
         $totalPaid = 0;
 
         foreach ($fees as $fee) {
-
             $amountDue = (float) $fee->montant;
 
             $payments = $perceptions->where('frais_id', $fee->id);
-
             $amountPaid = (float) $payments->sum('montant');
 
-            $outstanding = max(
-                0,
-                $amountDue - $amountPaid
-            );
+            $outstanding = max(0, $amountDue - $amountPaid);
 
             $totalDue += $amountDue;
             $totalPaid += $amountPaid;
@@ -100,7 +87,6 @@ class PosStudentController extends Controller
             $period = null;
 
             if ($fee->frequence !== null) {
-
                 if (method_exists($fee->frequence, 'label')) {
                     $period = $fee->frequence->label();
                 } elseif (isset($fee->frequence->value)) {
@@ -128,10 +114,7 @@ class PosStudentController extends Controller
             ];
         }
 
-        $outstanding = max(
-            0,
-            $totalDue - $totalPaid
-        );
+        $outstanding = max(0, $totalDue - $totalPaid);
 
         return response()->json([
             'student' => [
@@ -151,19 +134,16 @@ class PosStudentController extends Controller
             'fees' => $feesData,
         ]);
     }
+
     private function findStudent(string $identifier): ?Eleve
     {
         return Eleve::query()
             ->where(function ($query) use ($identifier) {
-
-                $query
-                    ->where('matricule', $identifier)
+                $query->where('matricule', $identifier)
                     ->orWhere('numero_permanent', $identifier)
                     ->orWhere('id', $identifier);
-
             })
             ->first();
-
     }
 
     private function studentName(Eleve $student): string
