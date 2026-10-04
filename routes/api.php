@@ -39,6 +39,7 @@ Route::prefix('v1')->group(function () {
                 [PosStudentController::class, 'paymentContext']
             )->name('api.v1.pos.students.payment-context');
 
+
         });
 
         Route::get('/dashboard', [DashboardController::class, 'index']);
