@@ -531,7 +531,8 @@ class PosPaymentController extends Controller
                     $result['payments'],
             ],
 
+
+
         ], 201);
     }
-
 }
