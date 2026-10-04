@@ -26,6 +26,7 @@ Route::prefix('v1')->group(function () {
 
         Route::get('/context', [ContextController::class, 'index']);
 
+
         Route::prefix('pos')->group(function () {
 
             Route::get(
