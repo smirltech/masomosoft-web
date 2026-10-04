@@ -160,6 +160,7 @@ class PosStudentController extends Controller
 
             })
             ->first();
+
     }
 
     private function studentName(Eleve $student): string
