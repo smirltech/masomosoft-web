@@ -24,6 +24,7 @@ return new class extends Migration
                 'client_payment_id',
             ]);
 
+
             $table->dropColumn('client_payment_id');
         });
     }
