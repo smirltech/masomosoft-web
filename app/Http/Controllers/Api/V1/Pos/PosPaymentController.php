@@ -533,5 +533,4 @@ class PosPaymentController extends Controller
 
         ], 201);
     }
-
 }
