@@ -12,28 +12,42 @@ use Illuminate\Http\JsonResponse;
 
 class PosStudentController extends Controller
 {
-    public function show(string $identifier): JsonResponse
+    public function index(Request $request): JsonResponse
     {
-        $student = $this->findStudent($identifier);
+        $search = trim((string) $request->input('search', ''));
+        $limit = min((int) $request->input('limit', 10), 10);
 
-        if (! $student) {
+        if ($search === '') {
             return response()->json([
-                'message' => 'Student not found.',
-            ], 404);
+                'data' => [],
+            ]);
         }
 
-        $inscription = $student->inscriptions()
-            ->with('classe')
-            ->where('annee_id', Annee::id())
-            ->first();
+        $students = Eleve::query()
+            ->where(function ($query) use ($search) {
+                $query->where('matricule', 'like', '%' . $search . '%')
+                    ->orWhere('nom', 'like', '%' . $search . '%');
+            })
+            ->with([
+                'inscriptions' => function ($query) {
+                    $query->where('annee_id', Annee::id())
+                        ->with('classe');
+                },
+            ])
+            ->limit($limit)
+            ->get();
 
         return response()->json([
-            'student' => [
-                'id' => $student->id,
-                'name' => $this->studentName($student),
-                'matricule' => $student->matricule,
-                'class' => $inscription?->classe?->code,
-            ],
+            'data' => $students->map(function ($student) {
+                $inscription = $student->inscriptions->first();
+
+                return [
+                    'id' => $student->id,
+                    'name' => $this->studentName($student),
+                    'matricule' => $student->matricule,
+                    'class' => $inscription?->classe?->code,
+                ];
+            })->values(),
         ]);
     }
 

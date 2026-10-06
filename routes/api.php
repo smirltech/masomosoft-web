@@ -47,6 +47,10 @@ Route::prefix('v1')->group(function () {
 
         });
 
+
+
+
+
         Route::get('/dashboard', [DashboardController::class, 'index']);
 
         Route::get('/scolarite/eleves', [EleveController::class, 'index'])
