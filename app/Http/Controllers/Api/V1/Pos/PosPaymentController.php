@@ -16,13 +16,19 @@ use Throwable;
 
 class PosPaymentController extends Controller
 {
-
     public function store(Request $request): JsonResponse
     {
+
 
         $validated = $request->validate([
             'client_payment_id' => [
                 'required',
+                'string',
+                'max:100',
+            ],
+
+            'receipt_number' => [
+                'nullable',
                 'string',
                 'max:100',
             ],
@@ -81,6 +87,7 @@ class PosPaymentController extends Controller
         ]);
 
 
+
         $user = $request->user();
 
         if (! $user) {
@@ -99,9 +106,15 @@ class PosPaymentController extends Controller
         }
 
 
+
+        $paymentCurrency = strtoupper(
+            trim((string) $validated['currency'])
+        );
+
+
         $existingPayment = Perception::query()
             ->where(
-                'client_payment_id',
+                'reference',
                 $validated['client_payment_id']
             )
             ->first();
@@ -114,29 +127,38 @@ class PosPaymentController extends Controller
                     $validated['client_payment_id'],
 
                 'payment' => [
-                    'id' => $existingPayment->id,
-                    'reference' => $existingPayment->reference,
+                    'id' =>
+                        $existingPayment->id,
+
+                    'reference' =>
+                        $existingPayment->reference,
                 ],
             ], 409);
         }
 
-        try {
 
+
+        try {
             $result = DB::transaction(function () use (
                 $validated,
                 $annee,
-                $user
+                $user,
+                $paymentCurrency
             ) {
 
 
-                $studentIdentifier =
-                    $validated['student_id'];
+                $studentIdentifier = trim(
+                    (string) $validated['student_id']
+                );
 
                 $student = Eleve::query()
                     ->where(function ($query) use ($studentIdentifier) {
 
                         $query
-                            ->where('id', $studentIdentifier)
+                            ->where(
+                                'id',
+                                $studentIdentifier
+                            )
                             ->orWhere(
                                 'matricule',
                                 $studentIdentifier
@@ -145,6 +167,7 @@ class PosPaymentController extends Controller
                                 'numero_permanent',
                                 $studentIdentifier
                             );
+
                     })
                     ->first();
 
@@ -156,7 +179,9 @@ class PosPaymentController extends Controller
                     ]);
                 }
 
-                $inscription = $student->inscriptions()
+
+                $inscription = $student
+                    ->inscriptions()
                     ->with('classe')
                     ->where(
                         'annee_id',
@@ -175,7 +200,7 @@ class PosPaymentController extends Controller
 
                 $duplicate = Perception::query()
                     ->where(
-                        'client_payment_id',
+                        'reference',
                         $validated['client_payment_id']
                     )
                     ->lockForUpdate()
@@ -190,11 +215,17 @@ class PosPaymentController extends Controller
                 }
 
 
+
                 $payments = [];
 
                 $totalPaid = 0;
 
-                foreach ($validated['items'] as $index => $item) {
+
+
+                foreach (
+                    $validated['items']
+                    as $index => $item
+                ) {
 
 
 
@@ -233,18 +264,14 @@ class PosPaymentController extends Controller
                         : (string) $fee->devise;
 
                     $feeCurrency = strtoupper(
-                        $feeCurrency ?: 'USD'
+                        trim(
+                            $feeCurrency ?: 'USD'
+                        )
                     );
 
-                    $paymentCurrency =
-                        strtoupper(
-                            $validated['currency']
-                        );
 
-                    if (
-                        $feeCurrency !==
-                        $paymentCurrency
-                    ) {
+                    if ($feeCurrency !== $paymentCurrency) {
+
                         throw ValidationException::withMessages([
                             'currency' => [
                                 'The payment currency does not match fee '
@@ -254,15 +281,24 @@ class PosPaymentController extends Controller
                                 . '.',
                             ],
                         ]);
+
                     }
 
 
-                    $amountDue =
-                        (float) $fee->montant;
+
+                    $amountDue = (float) $fee->montant;
+
+                    if ($amountDue <= 0) {
+                        throw ValidationException::withMessages([
+                            "items.$index.fee_id" => [
+                                'The selected fee has an invalid amount.',
+                            ],
+                        ]);
+                    }
 
 
-                    $period =
-                        $item['period'] ?? null;
+
+                    $period = $item['period'] ?? null;
 
 
 
@@ -285,14 +321,27 @@ class PosPaymentController extends Controller
                         );
 
                     if ($period !== null) {
+
                         $paidQuery->where(
                             'custom_property',
                             $period
                         );
+
                     }
 
-                    $amountPaid =
-                        (float) $paidQuery->sum('montant');
+
+
+                    $existingPerceptions = $paidQuery
+                        ->lockForUpdate()
+                        ->get();
+
+
+
+                    $amountPaid = (float) $existingPerceptions->sum(
+                        fn (Perception $perception) =>
+                        (float) $perception->montant
+                    );
+
 
 
                     $outstanding = max(
@@ -301,15 +350,11 @@ class PosPaymentController extends Controller
                     );
 
 
-                    $requestedAmount =
-                        (float) $item['amount'];
+                    $requestedAmount = (float) $item['amount'];
 
 
+                    if ($requestedAmount > $outstanding) {
 
-                    if (
-                        $requestedAmount >
-                        $outstanding
-                    ) {
                         throw ValidationException::withMessages([
                             "items.$index.amount" => [
                                 'The payment amount for fee '
@@ -321,16 +366,13 @@ class PosPaymentController extends Controller
                                 . '.',
                             ],
                         ]);
+
                     }
 
 
+                    $perception = new Perception();
 
-                    $perception =
-                        new Perception();
-
-
-
-                    $perception->client_payment_id =
+                    $perception->reference =
                         $validated['client_payment_id'];
 
                     $perception->user_id =
@@ -351,6 +393,10 @@ class PosPaymentController extends Controller
                     $perception->montant =
                         $requestedAmount;
 
+
+
+                    $perception->taux = 1;
+
                     $perception->devise =
                         $paymentCurrency;
 
@@ -369,34 +415,29 @@ class PosPaymentController extends Controller
                     $perception->save();
 
 
+
                     $newAmountPaid =
                         $amountPaid +
                         $requestedAmount;
 
-
-
-                    $newOutstanding =
-                        max(
-                            $amountDue -
-                            $newAmountPaid,
-                            0
-                        );
-
+                    $newOutstanding = max(
+                        $amountDue -
+                        $newAmountPaid,
+                        0
+                    );
 
                     if ($newAmountPaid <= 0) {
 
                         $status = 'unpaid';
 
-                    } elseif (
-                        $newAmountPaid <
-                        $amountDue
-                    ) {
+                    } elseif ($newAmountPaid < $amountDue) {
 
                         $status = 'partial';
 
                     } else {
 
                         $status = 'paid';
+
                     }
 
 
@@ -414,7 +455,10 @@ class PosPaymentController extends Controller
                                 $fee->id,
 
                             'name' =>
-                                $fee->nom,
+                                trim(
+                                    (string) $fee->nom
+                                ),
+
                         ],
 
                         'period' =>
@@ -442,12 +486,11 @@ class PosPaymentController extends Controller
                             $validated['payment_method'],
 
                         'paid_at' =>
-                            $perception
-                                ->paid_at,
+                            $perception->paid_at,
+
                     ];
 
-                    $totalPaid +=
-                        $requestedAmount;
+                    $totalPaid += $requestedAmount;
                 }
 
                 return [
@@ -463,6 +506,7 @@ class PosPaymentController extends Controller
 
                     'total_paid' =>
                         $totalPaid,
+
                 ];
             });
 
@@ -481,37 +525,48 @@ class PosPaymentController extends Controller
         }
 
 
+
         return response()->json([
 
-            'message' =>
-                'Payment created successfully.',
-
-            'client_payment_id' =>
-                $validated['client_payment_id'],
-
-            'device_id' =>
-                $validated['device_id'],
-
-            'student' => [
+            'data' => [
 
                 'id' =>
-                    $result['student']->id,
+                    $result['payments'][0]['id'] ?? null,
 
-                'name' =>
-                    trim(
-                        $result['student']->nom
-                    ),
+                'client_payment_id' =>
+                    $validated['client_payment_id'],
 
-                'matricule' =>
-                    $result['student']->matricule,
+                'receipt_number' =>
+                    $validated['receipt_number'] ?? null,
 
-                'class' =>
-                    $result['inscription']
-                        ->classe
-                        ?->code,
-            ],
+                'device_id' =>
+                    $validated['device_id'],
 
-            'payment' => [
+                'status' =>
+                    'completed',
+
+                'student' => [
+
+                    'id' =>
+                        $result['student']->id,
+
+                    'name' =>
+                        trim(
+                            (string) $result['student']->nom
+                        ),
+
+                    'matricule' =>
+                        $result['student']->matricule,
+
+                    'class' =>
+                        $result['inscription']
+                            ->classe
+                            ?->code,
+
+                ],
+
+                'amount' =>
+                    $result['total_paid'],
 
                 'currency' =>
                     strtoupper(
@@ -524,15 +579,211 @@ class PosPaymentController extends Controller
                 'paid_at' =>
                     $validated['paid_at'],
 
-                'total_paid' =>
-                    $result['total_paid'],
-
                 'items' =>
                     $result['payments'],
+
             ],
 
-
-
         ], 201);
+    }
+
+
+
+    public function show(string $id): JsonResponse
+    {
+
+
+        $payment = Perception::query()
+            ->with([
+                'frais',
+                'inscription.classe',
+                'inscription.eleve',
+                'user',
+            ])
+            ->find($id);
+
+
+        if (! $payment) {
+            return response()->json([
+                'message' => 'Payment not found.',
+            ], 404);
+        }
+
+
+        $inscription = $payment->inscription;
+
+
+        $student = $inscription?->eleve;
+
+
+        $studentName = $student
+            ? trim((string) $student->nom)
+            : null;
+
+
+
+        $classCode = $inscription?->classe?->code;
+
+
+        $fee = $payment->frais;
+
+
+
+        $currency = $payment->devise;
+
+        if ($currency instanceof Devise) {
+            $currency = $currency->value;
+        }
+
+        $currency = strtoupper(
+            trim((string) $currency)
+        );
+
+
+
+        $receiptNumber = $payment->reference;
+
+
+
+        $operator = null;
+
+        if ($payment->user) {
+
+            $operator = [
+
+                'id' =>
+                    $payment->user->id,
+
+                'name' =>
+                    $this->userDisplayName(
+                        $payment->user
+                    ),
+
+            ];
+        }
+
+
+        $synchronization = [
+
+            'status' =>
+                'synchronized',
+
+            'pending' =>
+                false,
+
+        ];
+
+
+        return response()->json([
+
+            'data' => [
+
+                'id' =>
+                    $payment->id,
+
+                'receipt_number' =>
+                    $receiptNumber,
+
+                'reference' =>
+                    $payment->reference,
+
+                'status' =>
+                    'completed',
+
+                'synchronization' =>
+                    $synchronization,
+
+                'school' => [
+
+                    'name' =>
+                        config(
+                            'app.name',
+                            'MasomoSoft'
+                        ),
+
+                ],
+
+                'date_time' =>
+                    $payment->paid_at,
+
+                'student' => [
+
+                    'id' =>
+                        $student?->id,
+
+                    'name' =>
+                        $studentName,
+
+                    'matricule' =>
+                        $student?->matricule,
+
+                    'class' =>
+                        $classCode,
+
+                ],
+
+                'fees' => [
+
+                    [
+
+                        'id' =>
+                            $fee?->id,
+
+                        'name' =>
+                            $fee
+                                ? trim(
+                                (string) $fee->nom
+                            )
+                                : null,
+
+                        'amount' =>
+                            (float) $payment->frais_montant,
+
+                    ],
+
+                ],
+
+                'amount' =>
+                    (float) $payment->montant,
+
+                'currency' =>
+                    $currency,
+
+                'payment_method' =>
+                    $payment->paid_by,
+
+                'teller' =>
+                    $operator,
+
+            ],
+
+        ]);
+    }
+
+
+    private function userDisplayName($user): string
+    {
+
+        if (
+            isset($user->name) &&
+            trim((string) $user->name) !== ''
+        ) {
+            return trim(
+                (string) $user->name
+            );
+        }
+
+
+        $firstName = trim(
+            (string) ($user->first_name ?? '')
+        );
+
+        $lastName = trim(
+            (string) ($user->last_name ?? '')
+        );
+
+        return trim(
+            $firstName . ' ' . $lastName
+        );
     }
 }
