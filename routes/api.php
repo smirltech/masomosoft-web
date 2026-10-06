@@ -67,7 +67,6 @@ Route::prefix('v1')->group(function () {
                 PosPaymentController::class,
                 'show'
             ]);
-
         });
 
 

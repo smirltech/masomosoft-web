@@ -763,27 +763,8 @@ class PosPaymentController extends Controller
 
     private function userDisplayName($user): string
     {
-
-        if (
-            isset($user->name) &&
-            trim((string) $user->name) !== ''
-        ) {
             return trim(
                 (string) $user->name
             );
-        }
-
-
-        $firstName = trim(
-            (string) ($user->first_name ?? '')
-        );
-
-        $lastName = trim(
-            (string) ($user->last_name ?? '')
-        );
-
-        return trim(
-            $firstName . ' ' . $lastName
-        );
     }
 }
