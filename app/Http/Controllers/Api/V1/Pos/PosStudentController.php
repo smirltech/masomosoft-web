@@ -18,8 +18,8 @@ class PosStudentController extends Controller
         $search = trim((string) $request->input('search', ''));
 
         $limit = min(
-            max((int) $request->input('limit', 5), 1),
-            5
+            max((int) $request->input('limit', 10), 1),
+            10
         );
 
         if ($search === '') {
