@@ -7,6 +7,7 @@ use App\Models\Annee;
 use App\Models\Depense;
 use App\Models\Perception;
 use App\Models\Revenu;
+use Carbon\Carbon;
 use Illuminate\Support\Facades\Auth;
 
 class DashboardService
@@ -31,10 +32,12 @@ class DashboardService
                     'income' => $usd['income'],
                     'expenses' => $usd['expenses'],
                 ],
+
                 'CDF' => [
                     'income' => $cdf['income'],
                     'expenses' => $cdf['expenses'],
                 ],
+
                 'academic_year' => $this->academicYear($anneeId),
             ],
 
@@ -42,8 +45,11 @@ class DashboardService
         ];
     }
 
-    private function financialSummary(Devise $devise, int $anneeId): array
-    {
+
+    private function financialSummary(
+        Devise $devise,
+        int $anneeId
+    ): array {
         $income = $this->schoolFeeIncome($devise, $anneeId)
             + $this->otherIncome($devise, $anneeId);
 
@@ -56,11 +62,11 @@ class DashboardService
         ];
     }
 
-    /**
-     * Total school-fee collections.
-     */
-    private function schoolFeeIncome(Devise $devise, int $anneeId): float
-    {
+
+    private function schoolFeeIncome(
+        Devise $devise,
+        int $anneeId
+    ): float {
         return (float) Perception::query()
             ->where('annee_id', $anneeId)
             ->where('devise', $devise)
@@ -68,22 +74,22 @@ class DashboardService
             ->sum('montant');
     }
 
-    /**
-     * Other income recorded through the revenues module.
-     */
-    private function otherIncome(Devise $devise, int $anneeId): float
-    {
+
+    private function otherIncome(
+        Devise $devise,
+        int $anneeId
+    ): float {
         return (float) Revenu::query()
             ->where('annee_id', $anneeId)
             ->where('devise', $devise)
             ->sum('montant');
     }
 
-    /**
-     * Paid/validated expenses.
-     */
-    private function expenses(Devise $devise, int $anneeId): float
-    {
+
+    private function expenses(
+        Devise $devise,
+        int $anneeId
+    ): float {
         return (float) Depense::query()
             ->where('annee_id', $anneeId)
             ->where('devise', $devise)
@@ -91,9 +97,7 @@ class DashboardService
             ->sum('montant');
     }
 
-    /**
-     * Recent financial transactions, toutes devises confondues.
-     */
+
     private function recentTransactions(int $anneeId): array
     {
         $expenses = Depense::query()
@@ -105,14 +109,23 @@ class DashboardService
             ->map(function (Depense $expense) {
                 return [
                     'id' => $expense->id,
+
                     'type' => 'expense',
+
                     'description' => $expense->motif
                         ?? $expense->beneficiaire
                             ?? 'Dépense',
+
                     'amount' => (float) $expense->montant,
-                    'currency' => $expense->devise?->value,
-                    'date' => $expense->date
-                        ?? $expense->created_at?->toDateString(),
+
+                    'currency' => $this->currencyValue(
+                        $expense->devise
+                    ),
+
+                    'date' => $this->formatDate(
+                        $expense->date
+                        ?? $expense->created_at
+                    ),
                 ];
             });
 
@@ -124,11 +137,20 @@ class DashboardService
             ->map(function (Revenu $revenu) {
                 return [
                     'id' => $revenu->id,
+
                     'type' => 'income',
+
                     'description' => $revenu->nom,
+
                     'amount' => (float) $revenu->montant,
-                    'currency' => $revenu->devise?->value,
-                    'date' => $revenu->created_at?->toDateString(),
+
+                    'currency' => $this->currencyValue(
+                        $revenu->devise
+                    ),
+
+                    'date' => $this->formatDate(
+                        $revenu->created_at
+                    ),
                 ];
             });
 
@@ -141,11 +163,20 @@ class DashboardService
             ->map(function (Perception $perception) {
                 return [
                     'id' => $perception->id,
+
                     'type' => 'income',
+
                     'description' => 'Frais scolaires',
+
                     'amount' => (float) $perception->montant,
-                    'currency' => $perception->devise?->value,
-                    'date' => $perception->paid_at?->toDateString(),
+
+                    'currency' => $this->currencyValue(
+                        $perception->devise
+                    ),
+
+                    'date' => $this->formatDate(
+                        $perception->paid_at
+                    ),
                 ];
             });
 
@@ -157,6 +188,43 @@ class DashboardService
             ->values()
             ->all();
     }
+
+
+    private function currencyValue($currency): ?string
+    {
+        if ($currency instanceof Devise) {
+            return $currency->value;
+        }
+
+        if ($currency === null) {
+            return null;
+        }
+
+        return strtoupper(trim((string) $currency));
+    }
+
+
+    private function formatDate($date): ?string
+    {
+        if ($date === null || $date === '') {
+            return null;
+        }
+
+        if ($date instanceof Carbon) {
+            return $date->toDateString();
+        }
+
+        if ($date instanceof \DateTimeInterface) {
+            return $date->format('Y-m-d');
+        }
+
+        try {
+            return Carbon::parse($date)->toDateString();
+        } catch (\Throwable) {
+            return (string) $date;
+        }
+    }
+
 
     private function academicYear(?int $anneeId): ?array
     {
@@ -172,13 +240,18 @@ class DashboardService
 
         return [
             'id' => $annee->id,
+
             'name' => $annee->name,
+
             'is_current' => true,
         ];
     }
 
+
     private function notificationsCount(): int
     {
-        return Auth::check() ? Auth::user()->unreadNotifications()->count() : 0;
+        return Auth::check()
+            ? Auth::user()->unreadNotifications()->count()
+            : 0;
     }
 }
