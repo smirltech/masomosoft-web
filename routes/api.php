@@ -35,15 +35,16 @@ Route::prefix('v1')->group(function () {
                 [PosStudentController::class, 'index']
             )->name('api.v1.pos.students.index');
 
-//            Route::get(
-//                '/students/{identifier}',
-//                [PosStudentController::class, 'show']
-//            )->name('api.v1.pos.students.show');
+            Route::get(
+                '/students/{identifier}',
+                [PosStudentController::class, 'show']
+            )->name('api.v1.pos.students.show');
 
             Route::get(
                 '/students/{identifier}/payment-context',
                 [PosStudentController::class, 'paymentContext']
             )->name('api.v1.pos.students.payment-context');
+
 
             Route::post('/payments', [
                 PosPaymentController::class,

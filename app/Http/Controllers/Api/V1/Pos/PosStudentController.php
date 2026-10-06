@@ -13,114 +13,255 @@ use Illuminate\Http\Request;
 
 class PosStudentController extends Controller
 {
+    /**
+     * ============================================================
+     * STUDENT SEARCH
+     * ============================================================
+     *
+     * GET /api/v1/pos/students?search=keyword&limit=10
+     *
+     * Search a student by:
+     * - matricule
+     * - name
+     *
+     * Returns a maximum of 10 students.
+     */
     public function index(Request $request): JsonResponse
     {
-        $search = trim((string) $request->input('search', ''));
-
-        $limit = min(
-            max((int) $request->input('limit', 5), 1),
-            5
+        $search = trim(
+            (string) $request->input('search', '')
         );
 
+        /*
+         * Maximum 10 results.
+         */
+        $limit = min(
+            max(
+                (int) $request->input('limit', 10),
+                1
+            ),
+            10
+        );
+
+        /*
+         * Empty search.
+         */
         if ($search === '') {
             return response()->json([
                 'data' => [],
             ]);
         }
 
+        /*
+         * Current academic year.
+         */
         $anneeId = Annee::id();
 
+        /*
+         * Search students.
+         */
         $students = Eleve::query()
             ->where(function ($query) use ($search) {
+
                 $query
-                    ->where('matricule', 'like', '%' . $search . '%')
-                    ->orWhere('nom', 'like', '%' . $search . '%');
+                    ->where(
+                        'matricule',
+                        'like',
+                        '%' . $search . '%'
+                    )
+                    ->orWhere(
+                        'nom',
+                        'like',
+                        '%' . $search . '%'
+                    )
+                    ->orWhere(
+                        'numero_permanent',
+                        'like',
+                        '%' . $search . '%'
+                    );
+
             })
             ->with([
                 'inscriptions' => function ($query) use ($anneeId) {
+
                     $query
                         ->where('annee_id', $anneeId)
                         ->with('classe');
+
                 },
             ])
             ->limit($limit)
             ->get();
 
+        /*
+         * Format response.
+         */
         return response()->json([
             'data' => $students
                 ->map(function (Eleve $student) {
 
-                    $inscription = $student->inscriptions->first();
+                    $inscription =
+                        $student->inscriptions->first();
 
                     return [
                         'id' => $student->id,
-                        'name' => $this->studentName($student),
-                        'matricule' => $student->matricule,
-                        'class' => $inscription?->classe?->code,
+
+                        'name' => $this->studentName(
+                            $student
+                        ),
+
+                        'matricule' =>
+                            $student->matricule,
+
+                        'class' =>
+                            $inscription?->classe?->code,
                     ];
+
                 })
                 ->values(),
         ]);
     }
 
 
-    public function paymentContext(string $identifier): JsonResponse
+    /**
+     * ============================================================
+     * STUDENT LOOKUP
+     * ============================================================
+     *
+     * GET /api/v1/pos/students/{identifier}
+     *
+     * Locate a student using:
+     * - matricule
+     * - numero_permanent
+     * - database ID
+     *
+     * Returns:
+     * - student
+     * - financial summary
+     * - unpaid / partially paid fees only
+     */
+    public function show(string $identifier): JsonResponse
     {
+        $identifier = trim($identifier);
 
-        $student = $this->findStudent($identifier);
+        /*
+         * Validate identifier.
+         */
+        if ($identifier === '') {
+            return response()->json([
+                'message' =>
+                    'Student identifier is required.',
+            ], 422);
+        }
+
+        /*
+         * Find student.
+         */
+        $student = $this->findStudent(
+            $identifier
+        );
 
         if (! $student) {
             return response()->json([
                 'message' => 'Student not found.',
+                'identifier' => $identifier,
             ], 404);
         }
 
+        /*
+         * Current academic year.
+         */
         $anneeId = Annee::id();
 
-        $inscription = $student->inscriptions()
+        /*
+         * Current inscription.
+         */
+        $inscription = $student
+            ->inscriptions()
             ->with('classe')
             ->where('annee_id', $anneeId)
             ->first();
 
+        /*
+         * Student not registered.
+         */
         if (! $inscription) {
             return response()->json([
-                'message' => 'Student is not registered for the current academic year.',
+                'message' =>
+                    'Student is not registered for the current academic year.',
 
                 'student' => [
                     'id' => $student->id,
-                    'name' => $this->studentName($student),
-                    'matricule' => $student->matricule,
+
+                    'name' =>
+                        $this->studentName($student),
+
+                    'matricule' =>
+                        $student->matricule,
+
+                    'class' => null,
                 ],
 
                 'annee_id' => $anneeId,
             ], 422);
         }
 
+        /*
+         * Get fees.
+         */
         $fees = Frais::query()
             ->where(function ($query) use ($anneeId) {
+
                 $query
-                    ->where('annee_id', $anneeId)
+                    ->where(
+                        'annee_id',
+                        $anneeId
+                    )
                     ->orWhereNull('annee_id');
+
             })
             ->orderBy('nom')
             ->get();
 
+        /*
+         * Get student payments.
+         */
         $perceptions = Perception::query()
-            ->where('inscription_id', $inscription->id)
-            ->where('annee_id', $anneeId)
-            ->where('montant', '>', 0)
+            ->where(
+                'inscription_id',
+                $inscription->id
+            )
+            ->where(
+                'annee_id',
+                $anneeId
+            )
+            ->where(
+                'montant',
+                '>',
+                0
+            )
             ->get();
 
-
+        /*
+         * Amount paid grouped by fee.
+         */
         $paidByFee = $perceptions
             ->groupBy('frais_id')
             ->map(function ($items) {
-                return $items->sum(function ($perception) {
-                    return (float) $perception->montant;
-                });
+
+                return $items->sum(
+                    function ($perception) {
+
+                        return (float)
+                        $perception->montant;
+
+                    }
+                );
             });
 
-
+        /*
+         * Currency totals.
+         */
         $totalDueUSD = 0;
         $totalPaidUSD = 0;
 
@@ -129,33 +270,415 @@ class PosStudentController extends Controller
 
         $feesData = [];
 
-
+        /*
+         * Build unpaid / partial fees.
+         */
         foreach ($fees as $fee) {
 
+            $amountDue =
+                (float) $fee->montant;
 
-            $amountDue = (float) $fee->montant;
+            $currency =
+                $this->enumValue(
+                    $fee->devise
+                );
 
+            $currency =
+                $currency ?: 'USD';
 
-            $currency = $this->enumValue($fee->devise);
-
-            $currency = $currency ?: 'USD';
-
-
-            $amountPaid = (float) ($paidByFee->get($fee->id) ?? 0);
-
+            $amountPaid =
+                (float) (
+                    $paidByFee->get(
+                        $fee->id
+                    ) ?? 0
+                );
 
             $outstanding = max(
                 $amountDue - $amountPaid,
                 0
             );
 
+            /*
+             * Completely paid fees are excluded
+             * from this endpoint.
+             */
+            if ($outstanding <= 0) {
+                continue;
+            }
 
-
+            /*
+             * Status.
+             */
             if ($amountPaid <= 0) {
 
                 $status = 'unpaid';
 
-            } elseif ($amountPaid < $amountDue) {
+            } else {
+
+                $status = 'partial';
+            }
+
+            /*
+             * Currency totals.
+             */
+            if ($currency === 'USD') {
+
+                $totalDueUSD +=
+                    $amountDue;
+
+                $totalPaidUSD +=
+                    $amountPaid;
+
+            } elseif ($currency === 'CDF') {
+
+                $totalDueCDF +=
+                    $amountDue;
+
+                $totalPaidCDF +=
+                    $amountPaid;
+            }
+
+            /*
+             * Fee data.
+             */
+            $feesData[] = [
+
+                'id' =>
+                    $fee->id,
+
+                'name' =>
+                    $fee->nom,
+
+                'period' =>
+                    $this->enumValue(
+                        $fee->frequence
+                    ),
+
+                'amount_due' =>
+                    $amountDue,
+
+                'amount_paid' =>
+                    $amountPaid,
+
+                'outstanding' =>
+                    $outstanding,
+
+                'status' =>
+                    $status,
+
+                'currency' =>
+                    $currency,
+            ];
+        }
+
+        /*
+         * Determine currencies.
+         */
+        $currencies = collect(
+            $feesData
+        )
+            ->pluck('currency')
+            ->unique()
+            ->values();
+
+        /*
+         * One currency.
+         */
+        if ($currencies->count() === 1) {
+
+            $currency =
+                $currencies->first();
+
+            if ($currency === 'CDF') {
+
+                $amountDue =
+                    $totalDueCDF;
+
+                $amountPaid =
+                    $totalPaidCDF;
+
+            } else {
+
+                $amountDue =
+                    $totalDueUSD;
+
+                $amountPaid =
+                    $totalPaidUSD;
+            }
+
+            $financial = [
+
+                'currency' =>
+                    $currency,
+
+                'amount_due' =>
+                    $amountDue,
+
+                'amount_paid' =>
+                    $amountPaid,
+
+                'outstanding' =>
+                    max(
+                        $amountDue -
+                        $amountPaid,
+                        0
+                    ),
+            ];
+
+        } else {
+
+            /*
+             * Multiple currencies.
+             */
+            $financial = [
+
+                'USD' => [
+
+                    'amount_due' =>
+                        $totalDueUSD,
+
+                    'amount_paid' =>
+                        $totalPaidUSD,
+
+                    'outstanding' =>
+                        max(
+                            $totalDueUSD -
+                            $totalPaidUSD,
+                            0
+                        ),
+                ],
+
+                'CDF' => [
+
+                    'amount_due' =>
+                        $totalDueCDF,
+
+                    'amount_paid' =>
+                        $totalPaidCDF,
+
+                    'outstanding' =>
+                        max(
+                            $totalDueCDF -
+                            $totalPaidCDF,
+                            0
+                        ),
+                ],
+            ];
+        }
+
+        /*
+         * Final response.
+         */
+        return response()->json([
+
+            'student' => [
+
+                'id' =>
+                    $student->id,
+
+                'name' =>
+                    $this->studentName(
+                        $student
+                    ),
+
+                'matricule' =>
+                    $student->matricule,
+
+                'class' =>
+                    $inscription
+                        ->classe?->code,
+            ],
+
+            'financial' =>
+                $financial,
+
+            'fees' =>
+                $feesData,
+        ]);
+    }
+
+
+    /**
+     * ============================================================
+     * PAYMENT CONTEXT
+     * ============================================================
+     *
+     * GET /api/v1/pos/students/{identifier}/payment-context
+     *
+     * Returns ALL fees:
+     * - unpaid
+     * - partial
+     * - paid
+     */
+    public function paymentContext(
+        string $identifier
+    ): JsonResponse {
+
+        /*
+         * Find student.
+         */
+        $student = $this->findStudent(
+            $identifier
+        );
+
+        if (! $student) {
+            return response()->json([
+                'message' =>
+                    'Student not found.',
+            ], 404);
+        }
+
+        /*
+         * Current academic year.
+         */
+        $anneeId = Annee::id();
+
+        /*
+         * Current inscription.
+         */
+        $inscription = $student
+            ->inscriptions()
+            ->with('classe')
+            ->where(
+                'annee_id',
+                $anneeId
+            )
+            ->first();
+
+        /*
+         * Student not registered.
+         */
+        if (! $inscription) {
+            return response()->json([
+                'message' =>
+                    'Student is not registered for the current academic year.',
+
+                'student' => [
+
+                    'id' =>
+                        $student->id,
+
+                    'name' =>
+                        $this->studentName(
+                            $student
+                        ),
+
+                    'matricule' =>
+                        $student->matricule,
+
+                    'class' => null,
+                ],
+
+                'annee_id' =>
+                    $anneeId,
+            ], 422);
+        }
+
+        /*
+         * Get all fees.
+         */
+        $fees = Frais::query()
+            ->where(function ($query) use ($anneeId) {
+
+                $query
+                    ->where(
+                        'annee_id',
+                        $anneeId
+                    )
+                    ->orWhereNull(
+                        'annee_id'
+                    );
+
+            })
+            ->orderBy('nom')
+            ->get();
+
+        /*
+         * Get all perceptions.
+         */
+        $perceptions = Perception::query()
+            ->where(
+                'inscription_id',
+                $inscription->id
+            )
+            ->where(
+                'annee_id',
+                $anneeId
+            )
+            ->where(
+                'montant',
+                '>',
+                0
+            )
+            ->get();
+
+        /*
+         * Paid amount grouped by fee.
+         */
+        $paidByFee = $perceptions
+            ->groupBy('frais_id')
+            ->map(function ($items) {
+
+                return $items->sum(
+                    function ($perception) {
+
+                        return (float)
+                        $perception->montant;
+
+                    }
+                );
+            });
+
+        /*
+         * Currency totals.
+         */
+        $totalDueUSD = 0;
+        $totalPaidUSD = 0;
+
+        $totalDueCDF = 0;
+        $totalPaidCDF = 0;
+
+        $feesData = [];
+
+        /*
+         * Build ALL fees.
+         */
+        foreach ($fees as $fee) {
+
+            $amountDue =
+                (float) $fee->montant;
+
+            $currency =
+                $this->enumValue(
+                    $fee->devise
+                );
+
+            $currency =
+                $currency ?: 'USD';
+
+            $amountPaid =
+                (float) (
+                    $paidByFee->get(
+                        $fee->id
+                    ) ?? 0
+                );
+
+            $outstanding = max(
+                $amountDue -
+                $amountPaid,
+                0
+            );
+
+            /*
+             * Status.
+             */
+            if ($amountPaid <= 0) {
+
+                $status = 'unpaid';
+
+            } elseif (
+                $amountPaid < $amountDue
+            ) {
 
                 $status = 'partial';
 
@@ -164,139 +687,246 @@ class PosStudentController extends Controller
                 $status = 'paid';
             }
 
-
-
+            /*
+             * Currency totals.
+             */
             if ($currency === 'USD') {
 
-                $totalDueUSD += $amountDue;
+                $totalDueUSD +=
+                    $amountDue;
 
-                $totalPaidUSD += $amountPaid;
+                $totalPaidUSD +=
+                    $amountPaid;
 
             } elseif ($currency === 'CDF') {
 
-                $totalDueCDF += $amountDue;
+                $totalDueCDF +=
+                    $amountDue;
 
-                $totalPaidCDF += $amountPaid;
+                $totalPaidCDF +=
+                    $amountPaid;
             }
 
+            /*
+             * Fee.
+             */
             $feesData[] = [
 
-                'id' => $fee->id,
+                'id' =>
+                    $fee->id,
 
-                'name' => $fee->nom,
+                'name' =>
+                    $fee->nom,
 
-                'period' => $this->enumValue(
-                    $fee->frequence
-                ),
+                'period' =>
+                    $this->enumValue(
+                        $fee->frequence
+                    ),
 
-                'amount_due' => $amountDue,
+                'amount_due' =>
+                    $amountDue,
 
-                'amount_paid' => $amountPaid,
+                'amount_paid' =>
+                    $amountPaid,
 
-                'outstanding' => $outstanding,
+                'outstanding' =>
+                    $outstanding,
 
-                'status' => $status,
+                'status' =>
+                    $status,
 
-                'currency' => $currency,
+                'currency' =>
+                    $currency,
             ];
         }
 
-        $currencies = collect($feesData)
+        /*
+         * Determine currencies.
+         */
+        $currencies = collect(
+            $feesData
+        )
             ->pluck('currency')
             ->unique()
             ->values();
 
+        /*
+         * One currency.
+         */
         if ($currencies->count() === 1) {
 
-            $currency = $currencies->first();
+            $currency =
+                $currencies->first();
 
             if ($currency === 'CDF') {
 
-                $amountDue = $totalDueCDF;
-                $amountPaid = $totalPaidCDF;
+                $amountDue =
+                    $totalDueCDF;
+
+                $amountPaid =
+                    $totalPaidCDF;
 
             } else {
 
-                $amountDue = $totalDueUSD;
-                $amountPaid = $totalPaidUSD;
+                $amountDue =
+                    $totalDueUSD;
+
+                $amountPaid =
+                    $totalPaidUSD;
             }
 
             $financial = [
-                'currency' => $currency,
 
-                'amount_due' => $amountDue,
+                'currency' =>
+                    $currency,
 
-                'amount_paid' => $amountPaid,
+                'amount_due' =>
+                    $amountDue,
 
-                'outstanding' => max(
-                    $amountDue - $amountPaid,
-                    0
-                ),
+                'amount_paid' =>
+                    $amountPaid,
+
+                'outstanding' =>
+                    max(
+                        $amountDue -
+                        $amountPaid,
+                        0
+                    ),
             ];
 
         } else {
 
-
+            /*
+             * Multiple currencies.
+             */
             $financial = [
+
                 'USD' => [
-                    'amount_due' => $totalDueUSD,
-                    'amount_paid' => $totalPaidUSD,
-                    'outstanding' => max(
-                        $totalDueUSD - $totalPaidUSD,
-                        0
-                    ),
+
+                    'amount_due' =>
+                        $totalDueUSD,
+
+                    'amount_paid' =>
+                        $totalPaidUSD,
+
+                    'outstanding' =>
+                        max(
+                            $totalDueUSD -
+                            $totalPaidUSD,
+                            0
+                        ),
                 ],
 
                 'CDF' => [
-                    'amount_due' => $totalDueCDF,
-                    'amount_paid' => $totalPaidCDF,
-                    'outstanding' => max(
-                        $totalDueCDF - $totalPaidCDF,
-                        0
-                    ),
+
+                    'amount_due' =>
+                        $totalDueCDF,
+
+                    'amount_paid' =>
+                        $totalPaidCDF,
+
+                    'outstanding' =>
+                        max(
+                            $totalDueCDF -
+                            $totalPaidCDF,
+                            0
+                        ),
                 ],
             ];
         }
 
+        /*
+         * Final response.
+         */
         return response()->json([
 
             'student' => [
 
-                'id' => $student->id,
+                'id' =>
+                    $student->id,
 
-                'name' => $this->studentName($student),
+                'name' =>
+                    $this->studentName(
+                        $student
+                    ),
 
-                'matricule' => $student->matricule,
+                'matricule' =>
+                    $student->matricule,
 
-                'class' => $inscription->classe?->code,
+                'class' =>
+                    $inscription
+                        ->classe?->code,
             ],
 
-            'financial' => $financial,
+            'financial' =>
+                $financial,
 
-            'fees' => $feesData,
+            'fees' =>
+                $feesData,
         ]);
     }
 
-    private function findStudent(string $identifier): ?Eleve
-    {
+
+    /**
+     * ============================================================
+     * FIND STUDENT
+     * ============================================================
+     *
+     * Supported identifiers:
+     * - matricule
+     * - numero_permanent
+     * - ID
+     */
+    private function findStudent(
+        string $identifier
+    ): ?Eleve {
+
         return Eleve::query()
             ->where(function ($query) use ($identifier) {
 
                 $query
-                    ->where('matricule', $identifier)
-                    ->orWhere('numero_permanent', $identifier)
-                    ->orWhere('id', $identifier);
+                    ->where(
+                        'matricule',
+                        $identifier
+                    )
+                    ->orWhere(
+                        'numero_permanent',
+                        $identifier
+                    )
+                    ->orWhere(
+                        'id',
+                        $identifier
+                    );
 
             })
             ->first();
     }
 
-    private function studentName(Eleve $student): string
-    {
-        return trim($student->nom);
+
+    /**
+     * ============================================================
+     * STUDENT NAME
+     * ============================================================
+     */
+    private function studentName(
+        Eleve $student
+    ): string {
+
+        return trim(
+            $student->nom
+        );
     }
-    private function enumValue(mixed $value): mixed
-    {
+
+
+    /**
+     * ============================================================
+     * ENUM VALUE
+     * ============================================================
+     */
+    private function enumValue(
+        mixed $value
+    ): mixed {
+
         if ($value instanceof \BackedEnum) {
             return $value->value;
         }
@@ -304,29 +934,65 @@ class PosStudentController extends Controller
         return $value;
     }
 
-    private function formatDateTime(mixed $value): ?string
-    {
+
+    /**
+     * ============================================================
+     * FORMAT DATETIME
+     * ============================================================
+     */
+    private function formatDateTime(
+        mixed $value
+    ): ?string {
+
         if (! $value) {
             return null;
         }
 
-        if ($value instanceof \DateTimeInterface) {
-            return $value->format('Y-m-d H:i:s');
+        if (
+            $value instanceof
+            \DateTimeInterface
+        ) {
+
+            return $value->format(
+                'Y-m-d H:i:s'
+            );
         }
 
-        return Carbon::parse($value)->format('Y-m-d H:i:s');
+        return Carbon::parse(
+            $value
+        )->format(
+            'Y-m-d H:i:s'
+        );
     }
 
-    private function formatDate(mixed $value): ?string
-    {
+
+    /**
+     * ============================================================
+     * FORMAT DATE
+     * ============================================================
+     */
+    private function formatDate(
+        mixed $value
+    ): ?string {
+
         if (! $value) {
             return null;
         }
 
-        if ($value instanceof \DateTimeInterface) {
-            return $value->format('Y-m-d');
+        if (
+            $value instanceof
+            \DateTimeInterface
+        ) {
+
+            return $value->format(
+                'Y-m-d'
+            );
         }
 
-        return Carbon::parse($value)->format('Y-m-d');
+        return Carbon::parse(
+            $value
+        )->format(
+            'Y-m-d'
+        );
     }
 }
