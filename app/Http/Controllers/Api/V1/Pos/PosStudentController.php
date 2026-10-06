@@ -13,28 +13,12 @@ use Illuminate\Http\Request;
 
 class PosStudentController extends Controller
 {
-    /**
-     * ============================================================
-     * STUDENT SEARCH
-     * ============================================================
-     *
-     * GET /api/v1/pos/students?search=keyword&limit=10
-     *
-     * Search a student by:
-     * - matricule
-     * - name
-     *
-     * Returns a maximum of 10 students.
-     */
     public function index(Request $request): JsonResponse
     {
         $search = trim(
             (string) $request->input('search', '')
         );
 
-        /*
-         * Maximum 10 results.
-         */
         $limit = min(
             max(
                 (int) $request->input('limit', 10),
@@ -42,24 +26,14 @@ class PosStudentController extends Controller
             ),
             10
         );
-
-        /*
-         * Empty search.
-         */
         if ($search === '') {
             return response()->json([
                 'data' => [],
             ]);
         }
 
-        /*
-         * Current academic year.
-         */
-        $anneeId = Annee::id();
+        $anneeId = Annee::encours();
 
-        /*
-         * Search students.
-         */
         $students = Eleve::query()
             ->where(function ($query) use ($search) {
 
@@ -93,9 +67,6 @@ class PosStudentController extends Controller
             ->limit($limit)
             ->get();
 
-        /*
-         * Format response.
-         */
         return response()->json([
             'data' => $students
                 ->map(function (Eleve $student) {
@@ -122,31 +93,10 @@ class PosStudentController extends Controller
         ]);
     }
 
-
-    /**
-     * ============================================================
-     * STUDENT LOOKUP
-     * ============================================================
-     *
-     * GET /api/v1/pos/students/{identifier}
-     *
-     * Locate a student using:
-     * - matricule
-     * - numero_permanent
-     * - database ID
-     *
-     * Returns:
-     * - student
-     * - financial summary
-     * - unpaid / partially paid fees only
-     */
     public function show(string $identifier): JsonResponse
     {
         $identifier = trim($identifier);
 
-        /*
-         * Validate identifier.
-         */
         if ($identifier === '') {
             return response()->json([
                 'message' =>
@@ -154,9 +104,6 @@ class PosStudentController extends Controller
             ], 422);
         }
 
-        /*
-         * Find student.
-         */
         $student = $this->findStudent(
             $identifier
         );
@@ -168,23 +115,15 @@ class PosStudentController extends Controller
             ], 404);
         }
 
-        /*
-         * Current academic year.
-         */
-        $anneeId = Annee::id();
+        $anneeId = Annee::encours();
 
-        /*
-         * Current inscription.
-         */
+
         $inscription = $student
             ->inscriptions()
             ->with('classe')
             ->where('annee_id', $anneeId)
             ->first();
 
-        /*
-         * Student not registered.
-         */
         if (! $inscription) {
             return response()->json([
                 'message' =>
@@ -206,9 +145,7 @@ class PosStudentController extends Controller
             ], 422);
         }
 
-        /*
-         * Get fees.
-         */
+
         $fees = Frais::query()
             ->where(function ($query) use ($anneeId) {
 
@@ -223,9 +160,6 @@ class PosStudentController extends Controller
             ->orderBy('nom')
             ->get();
 
-        /*
-         * Get student payments.
-         */
         $perceptions = Perception::query()
             ->where(
                 'inscription_id',
@@ -242,9 +176,6 @@ class PosStudentController extends Controller
             )
             ->get();
 
-        /*
-         * Amount paid grouped by fee.
-         */
         $paidByFee = $perceptions
             ->groupBy('frais_id')
             ->map(function ($items) {
@@ -259,9 +190,7 @@ class PosStudentController extends Controller
                 );
             });
 
-        /*
-         * Currency totals.
-         */
+
         $totalDueUSD = 0;
         $totalPaidUSD = 0;
 
@@ -270,9 +199,7 @@ class PosStudentController extends Controller
 
         $feesData = [];
 
-        /*
-         * Build unpaid / partial fees.
-         */
+
         foreach ($fees as $fee) {
 
             $amountDue =
@@ -298,17 +225,11 @@ class PosStudentController extends Controller
                 0
             );
 
-            /*
-             * Completely paid fees are excluded
-             * from this endpoint.
-             */
             if ($outstanding <= 0) {
                 continue;
             }
 
-            /*
-             * Status.
-             */
+
             if ($amountPaid <= 0) {
 
                 $status = 'unpaid';
@@ -318,9 +239,7 @@ class PosStudentController extends Controller
                 $status = 'partial';
             }
 
-            /*
-             * Currency totals.
-             */
+
             if ($currency === 'USD') {
 
                 $totalDueUSD +=
@@ -338,9 +257,6 @@ class PosStudentController extends Controller
                     $amountPaid;
             }
 
-            /*
-             * Fee data.
-             */
             $feesData[] = [
 
                 'id' =>
@@ -371,9 +287,7 @@ class PosStudentController extends Controller
             ];
         }
 
-        /*
-         * Determine currencies.
-         */
+
         $currencies = collect(
             $feesData
         )
@@ -381,9 +295,7 @@ class PosStudentController extends Controller
             ->unique()
             ->values();
 
-        /*
-         * One currency.
-         */
+
         if ($currencies->count() === 1) {
 
             $currency =
@@ -427,9 +339,7 @@ class PosStudentController extends Controller
 
         } else {
 
-            /*
-             * Multiple currencies.
-             */
+
             $financial = [
 
                 'USD' => [
@@ -466,9 +376,6 @@ class PosStudentController extends Controller
             ];
         }
 
-        /*
-         * Final response.
-         */
         return response()->json([
 
             'student' => [
@@ -497,26 +404,11 @@ class PosStudentController extends Controller
         ]);
     }
 
-
-    /**
-     * ============================================================
-     * PAYMENT CONTEXT
-     * ============================================================
-     *
-     * GET /api/v1/pos/students/{identifier}/payment-context
-     *
-     * Returns ALL fees:
-     * - unpaid
-     * - partial
-     * - paid
-     */
     public function paymentContext(
         string $identifier
     ): JsonResponse {
 
-        /*
-         * Find student.
-         */
+
         $student = $this->findStudent(
             $identifier
         );
@@ -528,14 +420,9 @@ class PosStudentController extends Controller
             ], 404);
         }
 
-        /*
-         * Current academic year.
-         */
-        $anneeId = Annee::id();
 
-        /*
-         * Current inscription.
-         */
+        $anneeId = Annee::encours();
+
         $inscription = $student
             ->inscriptions()
             ->with('classe')
@@ -545,9 +432,6 @@ class PosStudentController extends Controller
             )
             ->first();
 
-        /*
-         * Student not registered.
-         */
         if (! $inscription) {
             return response()->json([
                 'message' =>
@@ -574,9 +458,7 @@ class PosStudentController extends Controller
             ], 422);
         }
 
-        /*
-         * Get all fees.
-         */
+
         $fees = Frais::query()
             ->where(function ($query) use ($anneeId) {
 
@@ -593,9 +475,7 @@ class PosStudentController extends Controller
             ->orderBy('nom')
             ->get();
 
-        /*
-         * Get all perceptions.
-         */
+
         $perceptions = Perception::query()
             ->where(
                 'inscription_id',
@@ -612,9 +492,7 @@ class PosStudentController extends Controller
             )
             ->get();
 
-        /*
-         * Paid amount grouped by fee.
-         */
+
         $paidByFee = $perceptions
             ->groupBy('frais_id')
             ->map(function ($items) {
@@ -629,9 +507,7 @@ class PosStudentController extends Controller
                 );
             });
 
-        /*
-         * Currency totals.
-         */
+
         $totalDueUSD = 0;
         $totalPaidUSD = 0;
 
@@ -640,9 +516,7 @@ class PosStudentController extends Controller
 
         $feesData = [];
 
-        /*
-         * Build ALL fees.
-         */
+
         foreach ($fees as $fee) {
 
             $amountDue =
@@ -669,9 +543,7 @@ class PosStudentController extends Controller
                 0
             );
 
-            /*
-             * Status.
-             */
+
             if ($amountPaid <= 0) {
 
                 $status = 'unpaid';
@@ -687,9 +559,7 @@ class PosStudentController extends Controller
                 $status = 'paid';
             }
 
-            /*
-             * Currency totals.
-             */
+
             if ($currency === 'USD') {
 
                 $totalDueUSD +=
@@ -707,9 +577,7 @@ class PosStudentController extends Controller
                     $amountPaid;
             }
 
-            /*
-             * Fee.
-             */
+
             $feesData[] = [
 
                 'id' =>
@@ -740,9 +608,7 @@ class PosStudentController extends Controller
             ];
         }
 
-        /*
-         * Determine currencies.
-         */
+
         $currencies = collect(
             $feesData
         )
@@ -796,9 +662,6 @@ class PosStudentController extends Controller
 
         } else {
 
-            /*
-             * Multiple currencies.
-             */
             $financial = [
 
                 'USD' => [
@@ -835,9 +698,6 @@ class PosStudentController extends Controller
             ];
         }
 
-        /*
-         * Final response.
-         */
         return response()->json([
 
             'student' => [
@@ -866,17 +726,6 @@ class PosStudentController extends Controller
         ]);
     }
 
-
-    /**
-     * ============================================================
-     * FIND STUDENT
-     * ============================================================
-     *
-     * Supported identifiers:
-     * - matricule
-     * - numero_permanent
-     * - ID
-     */
     private function findStudent(
         string $identifier
     ): ?Eleve {
@@ -903,11 +752,7 @@ class PosStudentController extends Controller
     }
 
 
-    /**
-     * ============================================================
-     * STUDENT NAME
-     * ============================================================
-     */
+
     private function studentName(
         Eleve $student
     ): string {
@@ -918,11 +763,6 @@ class PosStudentController extends Controller
     }
 
 
-    /**
-     * ============================================================
-     * ENUM VALUE
-     * ============================================================
-     */
     private function enumValue(
         mixed $value
     ): mixed {
@@ -935,11 +775,6 @@ class PosStudentController extends Controller
     }
 
 
-    /**
-     * ============================================================
-     * FORMAT DATETIME
-     * ============================================================
-     */
     private function formatDateTime(
         mixed $value
     ): ?string {
@@ -965,12 +800,6 @@ class PosStudentController extends Controller
         );
     }
 
-
-    /**
-     * ============================================================
-     * FORMAT DATE
-     * ============================================================
-     */
     private function formatDate(
         mixed $value
     ): ?string {
