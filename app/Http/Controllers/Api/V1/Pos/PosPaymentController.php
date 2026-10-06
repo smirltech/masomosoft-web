@@ -589,10 +589,8 @@ class PosPaymentController extends Controller
 
 
 
-    public function show(string $id): JsonResponse
+    public function show(string $reference): JsonResponse
     {
-
-
         $payment = Perception::query()
             ->with([
                 'frais',
@@ -600,8 +598,8 @@ class PosPaymentController extends Controller
                 'inscription.eleve',
                 'user',
             ])
-            ->find($id);
-
+            ->where('reference', $reference)
+            ->first();
 
         if (! $payment) {
             return response()->json([
@@ -609,23 +607,15 @@ class PosPaymentController extends Controller
             ], 404);
         }
 
-
         $inscription = $payment->inscription;
-
-
         $student = $inscription?->eleve;
-
+        $fee = $payment->frais;
 
         $studentName = $student
             ? trim((string) $student->nom)
             : null;
 
-
-
         $classCode = $inscription?->classe?->code;
-
-
-        $fee = $payment->frais;
 
 
 
@@ -635,132 +625,72 @@ class PosPaymentController extends Controller
             $currency = $currency->value;
         }
 
-        $currency = strtoupper(
-            trim((string) $currency)
-        );
-
-
-
-        $receiptNumber = $payment->reference;
+        $currency = strtoupper(trim((string) $currency));
 
 
 
         $operator = null;
 
         if ($payment->user) {
-
             $operator = [
-
-                'id' =>
-                    $payment->user->id,
-
-                'name' =>
-                    $this->userDisplayName(
-                        $payment->user
-                    ),
-
+                'id' => $payment->user->id,
+                'name' => $this->userDisplayName($payment->user),
             ];
         }
 
 
         $synchronization = [
-
-            'status' =>
-                'synchronized',
-
-            'pending' =>
-                false,
-
+            'status' => 'synchronized',
+            'pending' => false,
         ];
 
 
+
         return response()->json([
-
             'data' => [
+                'id' => $payment->id,
 
-                'id' =>
-                    $payment->id,
+                'receipt_number' => $payment->reference,
 
-                'receipt_number' =>
-                    $receiptNumber,
+                'reference' => $payment->reference,
 
-                'reference' =>
-                    $payment->reference,
+                'status' => 'completed',
 
-                'status' =>
-                    'completed',
-
-                'synchronization' =>
-                    $synchronization,
+                'synchronization' => $synchronization,
 
                 'school' => [
-
-                    'name' =>
-                        config(
-                            'app.name',
-                            'MasomoSoft'
-                        ),
-
+                    'name' => config('app.name', 'MasomoSoft'),
                 ],
 
-                'date_time' =>
-                    $payment->paid_at,
+                'date_time' => $payment->paid_at,
 
                 'student' => [
-
-                    'id' =>
-                        $student?->id,
-
-                    'name' =>
-                        $studentName,
-
-                    'matricule' =>
-                        $student?->matricule,
-
-                    'class' =>
-                        $classCode,
-
+                    'id' => $student?->id,
+                    'name' => $studentName,
+                    'matricule' => $student?->matricule,
+                    'class' => $classCode,
                 ],
 
                 'fees' => [
-
                     [
-
-                        'id' =>
-                            $fee?->id,
-
-                        'name' =>
-                            $fee
-                                ? trim(
-                                (string) $fee->nom
-                            )
-                                : null,
-
-                        'amount' =>
-                            (float) $payment->frais_montant,
-
+                        'id' => $fee?->id,
+                        'name' => $fee
+                            ? trim((string) $fee->nom)
+                            : null,
+                        'amount' => (float) $payment->frais_montant,
                     ],
-
                 ],
 
-                'amount' =>
-                    (float) $payment->montant,
+                'amount' => (float) $payment->montant,
 
-                'currency' =>
-                    $currency,
+                'currency' => $currency,
 
-                'payment_method' =>
-                    $payment->paid_by,
+                'payment_method' => $payment->paid_by,
 
-                'teller' =>
-                    $operator,
-
+                'teller' => $operator,
             ],
-
         ]);
     }
-
-
     private function userDisplayName($user): string
     {
             return trim(
