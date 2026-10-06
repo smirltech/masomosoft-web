@@ -16,6 +16,7 @@ class PosStudentController extends Controller
     public function index(Request $request): JsonResponse
     {
         $search = trim((string) $request->input('search', ''));
+
         $limit = min(
             max((int) $request->input('limit', 5), 1),
             5
@@ -31,24 +32,19 @@ class PosStudentController extends Controller
 
         $students = Eleve::query()
             ->where(function ($query) use ($search) {
-
                 $query
                     ->where('matricule', 'like', '%' . $search . '%')
                     ->orWhere('nom', 'like', '%' . $search . '%');
-
             })
             ->with([
                 'inscriptions' => function ($query) use ($anneeId) {
-
                     $query
                         ->where('annee_id', $anneeId)
                         ->with('classe');
-
                 },
             ])
             ->limit($limit)
             ->get();
-
 
         return response()->json([
             'data' => $students
@@ -62,11 +58,11 @@ class PosStudentController extends Controller
                         'matricule' => $student->matricule,
                         'class' => $inscription?->classe?->code,
                     ];
-
                 })
                 ->values(),
         ]);
     }
+
 
     public function paymentContext(string $identifier): JsonResponse
     {
