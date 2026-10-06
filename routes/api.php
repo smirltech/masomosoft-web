@@ -31,6 +31,11 @@ Route::prefix('v1')->group(function () {
         Route::prefix('pos')->group(function () {
 
             Route::get(
+                '/students',
+                [PosStudentController::class, 'index']
+            )->name('api.v1.pos.students.index');
+
+            Route::get(
                 '/students/{identifier}',
                 [PosStudentController::class, 'show']
             )->name('api.v1.pos.students.show');

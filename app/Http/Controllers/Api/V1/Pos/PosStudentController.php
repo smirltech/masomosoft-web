@@ -13,10 +13,13 @@ use Illuminate\Http\Request;
 
 class PosStudentController extends Controller
 {
-    public function show(Request $request): JsonResponse
+    public function index(Request $request): JsonResponse
     {
         $search = trim((string) $request->input('search', ''));
-        $limit = min((int) $request->input('limit', 10), 10);
+        $limit = min(
+            max((int) $request->input('limit', 5), 1),
+            5
+        );
 
         if ($search === '') {
             return response()->json([
@@ -24,31 +27,44 @@ class PosStudentController extends Controller
             ]);
         }
 
+        $anneeId = Annee::id();
+
         $students = Eleve::query()
             ->where(function ($query) use ($search) {
-                $query->where('matricule', 'like', '%' . $search . '%')
+
+                $query
+                    ->where('matricule', 'like', '%' . $search . '%')
                     ->orWhere('nom', 'like', '%' . $search . '%');
+
             })
             ->with([
-                'inscriptions' => function ($query) {
-                    $query->where('annee_id', Annee::id())
+                'inscriptions' => function ($query) use ($anneeId) {
+
+                    $query
+                        ->where('annee_id', $anneeId)
                         ->with('classe');
+
                 },
             ])
             ->limit($limit)
             ->get();
 
-        return response()->json([
-            'data' => $students->map(function ($student) {
-                $inscription = $student->inscriptions->first();
 
-                return [
-                    'id' => $student->id,
-                    'name' => $this->studentName($student),
-                    'matricule' => $student->matricule,
-                    'class' => $inscription?->classe?->code,
-                ];
-            })->values(),
+        return response()->json([
+            'data' => $students
+                ->map(function (Eleve $student) {
+
+                    $inscription = $student->inscriptions->first();
+
+                    return [
+                        'id' => $student->id,
+                        'name' => $this->studentName($student),
+                        'matricule' => $student->matricule,
+                        'class' => $inscription?->classe?->code,
+                    ];
+
+                })
+                ->values(),
         ]);
     }
 
