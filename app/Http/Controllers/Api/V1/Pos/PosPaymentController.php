@@ -4,23 +4,49 @@ namespace App\Http\Controllers\Api\V1\Pos;
 
 use App\Enums\Devise;
 use App\Http\Controllers\Controller;
+use App\Models\Annee;
 use App\Models\Eleve;
+use App\Models\Frais;
 use App\Models\Perception;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Validation\ValidationException;
 use Throwable;
 
 class PosPaymentController extends Controller
 {
     /**
      * Create POS payment.
+     *
+     * The payment reference is stored in perceptions.reference
+     * and can later be retrieved using:
+     *
+     * GET /api/v1/pos/payments/{reference}
      */
     public function store(Request $request): JsonResponse
     {
         $validated = $request->validate([
-            'client_payment_id' => [
+            /*
+            |--------------------------------------------------------------------------
+            | PAYMENT IDENTIFIERS
+            |--------------------------------------------------------------------------
+            */
+
+            'reference' => [
                 'required',
+                'string',
+                'max:100',
+            ],
+
+            'client_payment_id' => [
+                'nullable',
+                'string',
+                'max:100',
+            ],
+
+            'receipt_number' => [
+                'nullable',
                 'string',
                 'max:100',
             ],
@@ -32,14 +58,21 @@ class PosPaymentController extends Controller
             ],
 
             /*
-             * Peut être un ID numérique,
-             * un matricule ou un numéro permanent.
-             */
+            |--------------------------------------------------------------------------
+            | STUDENT
+            |--------------------------------------------------------------------------
+            */
+
             'student_id' => [
                 'required',
                 'string',
-                'max:100',
             ],
+
+            /*
+            |--------------------------------------------------------------------------
+            | PAYMENT ITEMS
+            |--------------------------------------------------------------------------
+            */
 
             'items' => [
                 'required',
@@ -50,6 +83,7 @@ class PosPaymentController extends Controller
             'items.*.fee_id' => [
                 'required',
                 'integer',
+                'distinct',
             ],
 
             'items.*.amount' => [
@@ -58,124 +92,116 @@ class PosPaymentController extends Controller
                 'gt:0',
             ],
 
+            'items.*.period' => [
+                'nullable',
+                'string',
+                'max:100',
+            ],
+
+            /*
+            |--------------------------------------------------------------------------
+            | PAYMENT
+            |--------------------------------------------------------------------------
+            */
+
             'currency' => [
                 'required',
                 'string',
-                'size:3',
+                'in:USD,CDF',
             ],
 
             'payment_method' => [
                 'required',
                 'string',
-                'in:cash',
+                'in:cash,bank_transfer,mobile_money,card',
+            ],
+
+            'paid_at' => [
+                'required',
+                'date',
             ],
         ]);
 
+
+
         $user = $request->user();
 
-        if (!$user) {
+        if (! $user) {
             return response()->json([
                 'message' => 'Unauthenticated.',
             ], 401);
         }
 
-        /*
-        |--------------------------------------------------------------------------
-        | NORMALIZE CURRENCY
-        |--------------------------------------------------------------------------
-        */
 
-        $paymentCurrency = strtoupper(
-            trim($validated['currency'])
-        );
 
-        if (!in_array($paymentCurrency, ['USD', 'CDF'], true)) {
+        $annee = Annee::id();
+
+        if (! $annee) {
             return response()->json([
-                'message' => 'Unsupported currency.',
+                'message' => 'No current academic year found.',
             ], 422);
         }
 
-        /*
-        |--------------------------------------------------------------------------
-        | TRANSACTION
-        |--------------------------------------------------------------------------
-        */
+
+        $paymentCurrency = strtoupper(
+            trim((string) $validated['currency'])
+        );
+
+
+        $reference = trim(
+            (string) $validated['reference']
+        );
+
+
+
+
+        $existingPayment = Perception::query()
+            ->where('reference', $reference)
+            ->first();
+
+        if ($existingPayment) {
+            return response()->json([
+                'message' => 'This payment reference has already been processed.',
+
+                'reference' => $reference,
+
+                'payment' => [
+                    'id' => $existingPayment->id,
+                    'reference' => $existingPayment->reference,
+                    'amount' => (float) $existingPayment->montant,
+                    'currency' => $this->normalizeCurrency(
+                        $existingPayment->devise
+                    ),
+                    'paid_at' => $existingPayment->paid_at,
+                ],
+            ], 409);
+        }
+
 
         try {
-            return DB::transaction(function () use (
+            $result = DB::transaction(function () use (
                 $validated,
+                $annee,
                 $user,
-                $paymentCurrency
+                $paymentCurrency,
+                $reference
             ) {
 
-                /*
-                |--------------------------------------------------------------------------
-                | 1. IDEMPOTENCY
-                |--------------------------------------------------------------------------
-                |
-                | Si le POS renvoie le même paiement à cause d'un problème
-                | réseau, on ne crée pas une deuxième perception.
-                |
-                */
-
-                $existingPayment = Perception::query()
-                    ->where(
-                        'custom_property->client_payment_id',
-                        $validated['client_payment_id']
-                    )
-                    ->first();
-
-                if ($existingPayment) {
-                    return response()->json([
-                        'data' => $this->paymentResponse(
-                            $existingPayment
-                        ),
-                    ], 200);
-                }
-
-                /*
-                |--------------------------------------------------------------------------
-                | 2. FIND STUDENT
-                |--------------------------------------------------------------------------
-                |
-                | student_id peut correspondre à :
-                |
-                | - eleve.id
-                | - matricule
-                | - numero_permanent
-                |
-                */
 
                 $studentIdentifier = trim(
                     (string) $validated['student_id']
                 );
 
-                $studentQuery = Eleve::query()
-                    ->lockForUpdate();
 
-                if (ctype_digit($studentIdentifier)) {
 
-                    $studentQuery->where(function ($query) use ($studentIdentifier) {
-
-                        $query
-                            ->where('id', (int) $studentIdentifier)
-                            ->orWhere(
-                                'matricule',
-                                $studentIdentifier
-                            )
-                            ->orWhere(
-                                'numero_permanent',
-                                $studentIdentifier
-                            );
-
-                    });
-
-                } else {
-
-                    $studentQuery->where(function ($query) use ($studentIdentifier) {
-
+                $student = Eleve::query()
+                    ->where(function ($query) use ($studentIdentifier) {
                         $query
                             ->where(
+                                'id',
+                                $studentIdentifier
+                            )
+                            ->orWhere(
                                 'matricule',
                                 $studentIdentifier
                             )
@@ -183,589 +209,613 @@ class PosPaymentController extends Controller
                                 'numero_permanent',
                                 $studentIdentifier
                             );
+                    })
+                    ->first();
 
-                    });
+                if (! $student) {
+                    throw ValidationException::withMessages([
+                        'student_id' => [
+                            'Student not found.',
+                        ],
+                    ]);
                 }
 
-                $student = $studentQuery->first();
 
-                if (!$student) {
-                    return response()->json([
-                        'message' => 'Student does not exist.',
 
-                        'student_id' =>
-                            $validated['student_id'],
-                    ], 422);
-                }
-
-                /*
-                |--------------------------------------------------------------------------
-                | 3. FIND CURRENT ENROLLMENT
-                |--------------------------------------------------------------------------
-                */
-
-                $inscriptionQuery = $student->inscriptions();
-
-                /*
-                 * Si l'utilisateur possède une école,
-                 * on limite à son école.
-                 */
-                if (!empty($user->school_id)) {
-                    $inscriptionQuery->where(
-                        'schools.id',
-                        $user->school_id
-                    );
-                }
-
-                /*
-                 * Année académique de l'utilisateur.
-                 */
-                if (!empty($user->annee_id)) {
-                    $inscriptionQuery->where(
+                $inscription = $student
+                    ->inscriptions()
+                    ->with('classe')
+                    ->where(
                         'annee_id',
-                        $user->annee_id
-                    );
+                        $annee->id
+                    )
+                    ->first();
+
+                if (! $inscription) {
+                    throw ValidationException::withMessages([
+                        'student_id' => [
+                            'Student is not registered for the current academic year.',
+                        ],
+                    ]);
                 }
 
-                $inscription = $inscriptionQuery
+
+
+                $duplicate = Perception::query()
+                    ->where(
+                        'reference',
+                        $reference
+                    )
                     ->lockForUpdate()
                     ->first();
 
-                if (!$inscription) {
-                    return response()->json([
-                        'message' =>
-                            'Student does not have a valid enrollment for the current academic year.',
-
-                        'student' => [
-                            'id' => $student->id,
-
-                            'name' =>
-                                $this->studentName($student),
-
-                            'matricule' =>
-                                $student->matricule,
-
-                            'numero_permanent' =>
-                                $student->numero_permanent,
+                if ($duplicate) {
+                    throw ValidationException::withMessages([
+                        'reference' => [
+                            'This payment reference has already been processed.',
                         ],
-                    ], 422);
+                    ]);
                 }
 
-                /*
-                |--------------------------------------------------------------------------
-                | 4. SERVER DATE
-                |--------------------------------------------------------------------------
-                */
 
-                $paidAt = now();
+                $payments = [];
 
-                /*
-                |--------------------------------------------------------------------------
-                | 5. RECEIPT NUMBER
-                |--------------------------------------------------------------------------
-                */
+                $totalPaid = 0;
 
-                $receiptNumber =
-                    $this->generateReceiptNumber();
 
-                /*
-                |--------------------------------------------------------------------------
-                | 6. CREATE PAYMENTS
-                |--------------------------------------------------------------------------
-                */
+                foreach (
+                    $validated['items']
+                    as $index => $item
+                ) {
 
-                $createdPayments = [];
 
-                $totalAmount = 0;
-
-                foreach ($validated['items'] as $item) {
-
-                    /*
-                    |--------------------------------------------------------------------------
-                    | FIND FEE
-                    |--------------------------------------------------------------------------
-                    */
-
-                    $fee = DB::table('frais')
-                        ->where('id', $item['fee_id'])
+                    $fee = Frais::query()
+                        ->where(
+                            'id',
+                            $item['fee_id']
+                        )
+                        ->where(function ($query) use ($annee) {
+                            $query
+                                ->where(
+                                    'annee_id',
+                                    $annee->id
+                                )
+                                ->orWhereNull(
+                                    'annee_id'
+                                );
+                        })
                         ->lockForUpdate()
                         ->first();
 
-                    if (!$fee) {
-                        return response()->json([
-                            'message' =>
-                                "Fee {$item['fee_id']} does not exist.",
-                        ], 422);
+                    if (! $fee) {
+                        throw ValidationException::withMessages([
+                            "items.$index.fee_id" => [
+                                'Fee is not available for the current academic year.',
+                            ],
+                        ]);
                     }
 
-                    /*
-                    |--------------------------------------------------------------------------
-                    | FEE APPLICABILITY
-                    |--------------------------------------------------------------------------
-                    */
 
-                    if (!$this->feeIsApplicable(
-                        $fee,
-                        $student,
-                        $inscription
-                    )) {
-                        return response()->json([
-                            'message' =>
-                                "Fee {$item['fee_id']} is not applicable to this student.",
-                        ], 422);
-                    }
 
-                    /*
-                    |--------------------------------------------------------------------------
-                    | FEE CURRENCY
-                    |--------------------------------------------------------------------------
-                    */
+                    $feeCurrency = $fee->devise instanceof Devise
+                        ? $fee->devise->value
+                        : (string) $fee->devise;
 
-                    $feeCurrency = $this->normalizeCurrency(
-                        $fee->devise
+                    $feeCurrency = strtoupper(
+                        trim(
+                            $feeCurrency ?: 'USD'
+                        )
                     );
 
+
+
                     if ($feeCurrency !== $paymentCurrency) {
-                        return response()->json([
-                            'message' =>
-                                'The payment currency does not match the fee currency.',
-
-                            'fee' => [
-                                'id' => $fee->id,
-                                'currency' => $feeCurrency,
+                        throw ValidationException::withMessages([
+                            'currency' => [
+                                'The payment currency does not match fee '
+                                . $fee->id
+                                . '. Expected '
+                                . $feeCurrency
+                                . '.',
                             ],
-
-                            'payment' => [
-                                'currency' => $paymentCurrency,
-                            ],
-                        ], 422);
+                        ]);
                     }
 
-                    /*
-                    |--------------------------------------------------------------------------
-                    | OUTSTANDING BALANCE
-                    |--------------------------------------------------------------------------
-                    */
 
-                    $outstandingBalance =
-                        $this->calculateOutstandingBalance(
-                            $fee,
-                            $inscription
+
+                    $amountDue = (float) $fee->montant;
+
+                    if ($amountDue <= 0) {
+                        throw ValidationException::withMessages([
+                            "items.$index.fee_id" => [
+                                'The selected fee has an invalid amount.',
+                            ],
+                        ]);
+                    }
+
+
+
+                    $period = $item['period'] ?? null;
+
+
+
+                    $paidQuery = Perception::query()
+                        ->where(
+                            'inscription_id',
+                            $inscription->id
+                        )
+                        ->where(
+                            'annee_id',
+                            $annee->id
+                        )
+                        ->where(
+                            'frais_id',
+                            $fee->id
+                        )
+                        ->where(
+                            'devise',
+                            $paymentCurrency
                         );
 
-                    $requestedAmount =
-                        round(
-                            (float) $item['amount'],
-                            2
+                    if ($period !== null) {
+                        $paidQuery->where(
+                            'custom_property',
+                            $period
                         );
+                    }
 
-                    /*
-                    |--------------------------------------------------------------------------
-                    | PREVENT OVERPAYMENT
-                    |--------------------------------------------------------------------------
-                    */
+                    $existingPerceptions = $paidQuery
+                        ->lockForUpdate()
+                        ->get();
 
-                    if ($requestedAmount > $outstandingBalance) {
+                    $amountPaid = (float) $existingPerceptions->sum(
+                        fn (Perception $perception) =>
+                        (float) $perception->montant
+                    );
 
-                        return response()->json([
-                            'message' =>
-                                "Payment amount exceeds the outstanding balance for fee {$fee->id}.",
 
-                            'fee' => [
-                                'id' => $fee->id,
+                    $outstanding = max(
+                        $amountDue - $amountPaid,
+                        0
+                    );
 
-                                'name' =>
-                                    trim((string) $fee->nom),
 
-                                'amount' =>
-                                    (float) $fee->montant,
+                    $requestedAmount = (float) $item['amount'];
 
-                                'already_paid' =>
-                                    round(
-                                        (float) $fee->montant
-                                        - $outstandingBalance,
-                                        2
-                                    ),
 
-                                'outstanding' =>
-                                    $outstandingBalance,
 
-                                'currency' =>
-                                    $feeCurrency,
+                    if ($requestedAmount > $outstanding) {
+                        throw ValidationException::withMessages([
+                            "items.$index.amount" => [
+                                'The payment amount for fee '
+                                . $fee->id
+                                . ' exceeds the outstanding balance of '
+                                . $outstanding
+                                . ' '
+                                . $paymentCurrency
+                                . '.',
                             ],
-
-                            'requested_amount' =>
-                                $requestedAmount,
-
-                        ], 422);
+                        ]);
                     }
 
-                    /*
-                    |--------------------------------------------------------------------------
-                    | ZERO BALANCE
-                    |--------------------------------------------------------------------------
-                    */
 
-                    if ($outstandingBalance <= 0) {
-                        return response()->json([
-                            'message' =>
-                                "Fee {$fee->id} is already fully paid.",
 
-                            'fee_id' =>
-                                $fee->id,
-                        ], 422);
+                    $perception = new Perception();
+
+
+                    $perception->reference = $reference;
+
+                    $perception->user_id =
+                        $user->id;
+
+                    $perception->frais_id =
+                        $fee->id;
+
+                    $perception->inscription_id =
+                        $inscription->id;
+
+                    $perception->annee_id =
+                        $annee->id;
+
+                    $perception->custom_property =
+                        $period;
+
+                    $perception->montant =
+                        $requestedAmount;
+
+
+                    $perception->taux = 1;
+
+
+                    $perception->devise =
+                        $paymentCurrency;
+
+
+
+                    $perception->frais_montant =
+                        $amountDue;
+
+
+                    $perception->paid_by =
+                        $validated['payment_method'];
+
+
+                    $perception->paid_at =
+                        $validated['paid_at'];
+
+
+                    $perception->due_date =
+                        now()->toDateString();
+
+
+
+                    $perception->save();
+
+
+
+                    $newAmountPaid =
+                        $amountPaid +
+                        $requestedAmount;
+
+                    $newOutstanding = max(
+                        $amountDue -
+                        $newAmountPaid,
+                        0
+                    );
+
+
+
+                    if ($newAmountPaid <= 0) {
+                        $status = 'unpaid';
+                    } elseif ($newAmountPaid < $amountDue) {
+                        $status = 'partial';
+                    } else {
+                        $status = 'paid';
                     }
 
-                    /*
-                    |--------------------------------------------------------------------------
-                    | CREATE PERCEPTION
-                    |--------------------------------------------------------------------------
-                    */
 
-                    $payment = Perception::create([
+                    $payments[] = [
+                        'id' =>
+                            $perception->id,
 
                         'reference' =>
-                            $receiptNumber,
+                            $perception->reference,
 
-                        'user_id' =>
-                            $user->id,
-
-                        'frais_id' =>
-                            $fee->id,
-
-                        'inscription_id' =>
-                            $inscription->id,
-
-                        'annee_id' =>
-                            $inscription->annee_id,
-
-                        'custom_property' => [
-
-                            'client_payment_id' =>
-                                $validated['client_payment_id'],
-
-                            'device_id' =>
-                                $validated['device_id'],
-
-                            'student_id' =>
-                                $student->id,
-
-                            'payment_method' =>
-                                $validated['payment_method'],
-
-                        ],
-
-                        'montant' =>
-                            $requestedAmount,
-
-                        'taux' =>
-                            $fee->taux ?? 1,
-
-                        'devise' =>
-                            $paymentCurrency,
-
-                        'frais_montant' =>
-                            $fee->montant,
-
-                        'paid_by' =>
-                            $student->id,
-
-                        'paid_at' =>
-                            $paidAt,
-
-                        'due_date' =>
-                            $fee->due_date ?? null,
-                    ]);
-
-                    $createdPayments[] = $payment;
-
-                    $totalAmount += $requestedAmount;
-                }
-
-
-
-                $payment = $createdPayments[0];
-
-                return response()->json([
-                    'data' => [
-
-                        'id' =>
-                            $payment->id,
-
-                        'client_payment_id' =>
-                            $validated['client_payment_id'],
-
-                        'device_id' =>
-                            $validated['device_id'],
-
-                        'receipt_number' =>
-                            $receiptNumber,
-
-                        'status' =>
-                            'completed',
-
-                        'student' => [
-
+                        'fee' => [
                             'id' =>
-                                $student->id,
+                                $fee->id,
 
                             'name' =>
-                                $this->studentName($student),
-
-                            'matricule' =>
-                                $student->matricule,
-
-                            'numero_permanent' =>
-                                $student->numero_permanent,
-
+                                trim(
+                                    (string) $fee->nom
+                                ),
                         ],
 
+                        'period' =>
+                            $period,
+
+                        'amount_due' =>
+                            $amountDue,
+
                         'amount' =>
-                            round($totalAmount, 2),
+                            $requestedAmount,
+
+                        'amount_paid' =>
+                            $newAmountPaid,
+
+                        'outstanding' =>
+                            $newOutstanding,
 
                         'currency' =>
                             $paymentCurrency,
+
+                        'status' =>
+                            $status,
 
                         'payment_method' =>
                             $validated['payment_method'],
 
                         'paid_at' =>
-                            $paidAt->toIso8601String(),
+                            $perception->paid_at,
+                    ];
 
-                        'items' =>
-                            collect($createdPayments)
-                                ->map(function ($payment) {
+                    $totalPaid +=
+                        $requestedAmount;
+                }
 
-                                    return [
-                                        'id' =>
-                                            $payment->id,
 
-                                        'fee_id' =>
-                                            $payment->frais_id,
 
-                                        'amount' =>
-                                            (float) $payment->montant,
+                return [
+                    'student' =>
+                        $student,
 
-                                        'currency' =>
-                                            $this->normalizeCurrency(
-                                                $payment->devise
-                                            ),
-                                    ];
+                    'inscription' =>
+                        $inscription,
 
-                                })
-                                ->values(),
+                    'payments' =>
+                        $payments,
 
-                    ],
-                ], 201);
+                    'total_paid' =>
+                        $totalPaid,
+                ];
             });
-
+        } catch (ValidationException $exception) {
+            throw $exception;
         } catch (Throwable $exception) {
-
             report($exception);
 
             return response()->json([
                 'message' =>
                     'Payment could not be processed.',
-
-                'error' =>
-                    $exception->getMessage(),
-
             ], 500);
         }
-    }
 
+        return response()->json([
+            'data' => [
 
-    /**
-     * Generate unique receipt number.
-     */
-    private function generateReceiptNumber(): string
-    {
-        do {
-
-            $number =
-                'REC-' .
-                now()->format('Y') .
-                '-' .
-                str_pad(
-                    (string) random_int(
-                        1,
-                        9999999
-                    ),
-                    7,
-                    '0',
-                    STR_PAD_LEFT
-                );
-
-        } while (
-            Perception::query()
-                ->where(
-                    'reference',
-                    $number
-                )
-                ->exists()
-        );
-
-        return $number;
-    }
-
-
-    /**
-     * Check whether fee applies to student.
-     */
-    private function feeIsApplicable(
-        $fee,
-        $student,
-        $inscription
-    ): bool {
-
-
-        if (
-            !empty($fee->annee_id)
-            &&
-            (int) $fee->annee_id
-            !==
-            (int) $inscription->annee_id
-        ) {
-            return false;
-        }
-
-        return true;
-    }
-
-
-    /**
-     * Calculate outstanding balance.
-     */
-    private function calculateOutstandingBalance(
-        $fee,
-        $inscription
-    ): float {
-
-        $alreadyPaid = Perception::query()
-            ->where(
-                'frais_id',
-                $fee->id
-            )
-            ->where(
-                'inscription_id',
-                $inscription->id
-            )
-            ->where(
-                'annee_id',
-                $inscription->annee_id
-            )
-            ->sum('montant');
-
-        $feeAmount =
-            (float) $fee->montant;
-
-        $balance =
-            $feeAmount
-            -
-            (float) $alreadyPaid;
-
-        return max(
-            0,
-            round(
-                $balance,
-                2
-            )
-        );
-    }
-
-
-    /**
-     * Idempotent payment response.
-     */
-    private function paymentResponse(
-        Perception $payment
-    ): array {
-
-        $customProperty =
-            is_array($payment->custom_property)
-                ? $payment->custom_property
-                : [];
-
-        return [
-
-            'id' =>
-                $payment->id,
-
-            'client_payment_id' =>
-                data_get(
-                    $customProperty,
-                    'client_payment_id'
-                ),
-
-            'device_id' =>
-                data_get(
-                    $customProperty,
-                    'device_id'
-                ),
-
-            'receipt_number' =>
-                $payment->reference,
-
-            'status' =>
-                'completed',
-
-            'student' => [
 
                 'id' =>
-                    $payment->paid_by,
+                    $result['payments'][0]['id'] ?? null,
 
+                'reference' =>
+                    $reference,
+
+                'client_payment_id' =>
+                    $validated['client_payment_id'] ?? null,
+
+                'receipt_number' =>
+                    $validated['receipt_number'] ?? null,
+
+                'device_id' =>
+                    $validated['device_id'],
+
+                'status' =>
+                    'completed',
+
+
+
+                'student' => [
+                    'id' =>
+                        $result['student']->id,
+
+                    'name' =>
+                        trim(
+                            (string) $result['student']->nom
+                        ),
+
+                    'matricule' =>
+                        $result['student']->matricule,
+
+                    'class' =>
+                        $result['inscription']
+                            ->classe
+                            ?->code,
+                ],
+
+
+
+                'amount' =>
+                    $result['total_paid'],
+
+                'currency' =>
+                    strtoupper(
+                        $validated['currency']
+                    ),
+
+
+
+                'payment_method' =>
+                    $validated['payment_method'],
+
+
+
+                'paid_at' =>
+                    $validated['paid_at'],
+
+
+
+                'items' =>
+                    $result['payments'],
             ],
-
-            'amount' =>
-                (float) $payment->montant,
-
-            'currency' =>
-                $this->normalizeCurrency(
-                    $payment->devise
-                ),
-
-            'payment_method' =>
-                data_get(
-                    $customProperty,
-                    'payment_method'
-                ),
-
-            'paid_at' =>
-                optional(
-                    $payment->paid_at
-                )->toIso8601String(),
-        ];
+        ], 201);
     }
 
 
-
-    private function studentName($student): string
+    public function show(string $reference): JsonResponse
     {
-        return trim(
-            implode(
-                ' ',
-                array_filter([
-                    $student->nom ?? null,
-                ])
+
+
+        $reference = trim($reference);
+
+
+
+        $payment = Perception::query()
+            ->with([
+                'frais',
+                'inscription.classe',
+                'inscription.eleve',
+                'user',
+            ])
+            ->where(
+                'reference',
+                $reference
             )
-        );
-    }
+            ->first();
 
 
-    private function normalizeCurrency(
-        $currency
-    ): string {
 
-        if ($currency instanceof Devise) {
-            return strtoupper(
-                $currency->value
-            );
+        if (! $payment) {
+            return response()->json([
+                'message' =>
+                    'Payment not found.',
+
+                'reference' =>
+                    $reference,
+            ], 404);
         }
 
-        if ($currency instanceof \BackedEnum) {
-            return strtoupper(
-                (string) $currency->value
+
+
+        $inscription =
+            $payment->inscription;
+
+        $student =
+            $inscription?->eleve;
+
+        $fee =
+            $payment->frais;
+
+
+
+        $studentName = $student
+            ? trim(
+                (string) $student->nom
+            )
+            : null;
+
+
+
+        $classCode =
+            $inscription?->classe_code?->code;
+
+        /*
+        |--------------------------------------------------------------------------
+        | CURRENCY
+        |--------------------------------------------------------------------------
+        */
+
+        $currency =
+            $this->normalizeCurrency(
+                $payment->devise
             );
+
+
+
+        $operator = null;
+
+        if ($payment->user) {
+            $operator = [
+                'id' =>
+                    $payment->user->id,
+
+                'name' =>
+                    $this->userDisplayName(
+                        $payment->user
+                    ),
+            ];
+        }
+
+
+        $synchronization = [
+            'status' =>
+                'synchronized',
+
+            'pending' =>
+                false,
+        ];
+
+
+
+        return response()->json([
+            'data' => [
+
+
+                'id' =>
+                    $payment->id,
+
+                'reference' =>
+                    $payment->reference,
+
+                'receipt_number' =>
+                    $payment->reference,
+
+
+
+
+                'status' =>
+                    'completed',
+
+
+
+                'synchronization' =>
+                    $synchronization,
+
+
+
+                'school' => [
+                    'name' =>
+                        config(
+                            'app.name',
+                            'MasomoSoft'
+                        ),
+                ],
+
+
+
+                'date_time' =>
+                    $payment->paid_at,
+
+
+                'student' => [
+                    'id' =>
+                        $student?->id,
+
+                    'name' =>
+                        $studentName,
+
+                    'matricule' =>
+                        $student?->matricule,
+
+                    'class' =>
+                        $classCode,
+                ],
+
+
+
+                'fees' => [
+                    [
+                        'id' =>
+                            $fee?->id,
+
+                        'name' =>
+                            $fee
+                                ? trim(
+                                (string) $fee->nom
+                            )
+                                : null,
+
+                        'amount' =>
+                            (float) $payment->frais_montant,
+                    ],
+                ],
+
+
+
+                'amount' =>
+                    (float) $payment->montant,
+
+
+
+                'currency' =>
+                    $currency,
+
+
+                'payment_method' =>
+                    $payment->paid_by,
+
+
+
+                'teller' =>
+                    $operator,
+            ],
+        ]);
+    }
+
+
+    private function normalizeCurrency($currency): string
+    {
+        if ($currency instanceof Devise) {
+            $currency = $currency->value;
         }
 
         return strtoupper(
@@ -773,5 +823,13 @@ class PosPaymentController extends Controller
                 (string) $currency
             )
         );
+    }
+
+
+    private function userDisplayName($user): string
+    {
+
+           return $user->name;
+
     }
 }
