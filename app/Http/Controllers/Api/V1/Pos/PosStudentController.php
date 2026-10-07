@@ -32,7 +32,7 @@ class PosStudentController extends Controller
             ]);
         }
 
-        $anneeId = Annee::encours();
+        $anneeId = Annee::id();
 
         $students = Eleve::query()
             ->where(function ($query) use ($search) {
@@ -115,7 +115,7 @@ class PosStudentController extends Controller
             ], 404);
         }
 
-        $anneeId = Annee::encours();
+        $anneeId = Annee::id();
 
 
         $inscription = $student
@@ -421,7 +421,7 @@ class PosStudentController extends Controller
         }
 
 
-        $anneeId = Annee::encours();
+        $anneeId = Annee::id();
 
         $inscription = $student
             ->inscriptions()
