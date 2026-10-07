@@ -16,37 +16,12 @@ use Throwable;
 
 class PosPaymentController extends Controller
 {
-    /**
-     * Create POS payment.
-     *
-     * The payment reference is stored in perceptions.reference
-     * and can later be retrieved using:
-     *
-     * GET /api/v1/pos/payments/{reference}
-     */
-    public function store(Request $request): JsonResponse
+
+    public function store(Request $request)
     {
         $validated = $request->validate([
-            /*
-            |--------------------------------------------------------------------------
-            | PAYMENT IDENTIFIERS
-            |--------------------------------------------------------------------------
-            */
-
-            'reference' => [
-                'required',
-                'string',
-                'max:100',
-            ],
-
             'client_payment_id' => [
-                'nullable',
-                'string',
-                'max:100',
-            ],
-
-            'receipt_number' => [
-                'nullable',
+                'required',
                 'string',
                 'max:100',
             ],
@@ -57,22 +32,10 @@ class PosPaymentController extends Controller
                 'max:100',
             ],
 
-            /*
-            |--------------------------------------------------------------------------
-            | STUDENT
-            |--------------------------------------------------------------------------
-            */
-
             'student_id' => [
                 'required',
-                'string',
+                'integer',
             ],
-
-            /*
-            |--------------------------------------------------------------------------
-            | PAYMENT ITEMS
-            |--------------------------------------------------------------------------
-            */
 
             'items' => [
                 'required',
@@ -83,7 +46,6 @@ class PosPaymentController extends Controller
             'items.*.fee_id' => [
                 'required',
                 'integer',
-                'distinct',
             ],
 
             'items.*.amount' => [
@@ -92,730 +54,377 @@ class PosPaymentController extends Controller
                 'gt:0',
             ],
 
-            'items.*.period' => [
-                'nullable',
-                'string',
-                'max:100',
-            ],
-
-            /*
-            |--------------------------------------------------------------------------
-            | PAYMENT
-            |--------------------------------------------------------------------------
-            */
-
             'currency' => [
                 'required',
                 'string',
-                'in:USD,CDF',
+                'size:3',
             ],
 
             'payment_method' => [
                 'required',
                 'string',
-                'in:cash,bank_transfer,mobile_money,card',
-            ],
-
-            'paid_at' => [
-                'required',
-                'date',
+                'in:cash',
             ],
         ]);
 
-        /*
-        |--------------------------------------------------------------------------
-        | AUTHENTICATED USER
-        |--------------------------------------------------------------------------
-        */
+        return DB::transaction(function () use ($validated, $request) {
 
-        $user = $request->user();
+            /*
+             * 1. Vérifier que le device est autorisé.
+             */
+            $user = $request->user();
 
-        if (! $user) {
-            return response()->json([
-                'message' => 'Unauthenticated.',
-            ], 401);
-        }
+            if (!$user) {
+                abort(401, 'Unauthenticated.');
+            }
 
-        /*
-        |--------------------------------------------------------------------------
-        | CURRENT ACADEMIC YEAR
-        |--------------------------------------------------------------------------
-        */
+            /*
+             * Ici tu peux ajouter ta vérification :
+             *
+             * $this->authorizeDevice($user, $validated['device_id']);
+             */
 
-        $annee = Annee::id();
 
-        if (! $annee) {
-            return response()->json([
-                'message' => 'No current academic year found.',
-            ], 422);
-        }
+            /*
+             * 2. Vérifier que le paiement n'existe pas déjà.
+             *
+             * Très important pour éviter qu'un retry réseau
+             * crée deux paiements.
+             */
+            $existingPayment = Perception::query()
+                ->where('custom_property->client_payment_id', $validated['client_payment_id'])
+                ->first();
 
-        /*
-        |--------------------------------------------------------------------------
-        | NORMALIZE CURRENCY
-        |--------------------------------------------------------------------------
-        */
+            if ($existingPayment) {
+                return response()->json([
+                    'data' => $this->paymentResponse($existingPayment),
+                ], 200);
+            }
 
-        $paymentCurrency = strtoupper(
-            trim((string) $validated['currency'])
-        );
 
-        /*
-        |--------------------------------------------------------------------------
-        | NORMALIZE REFERENCE
-        |--------------------------------------------------------------------------
-        */
+            /*
+             * 3. Vérifier l'étudiant.
+             */
+            $student = Student::query()
+                ->where('id', $validated['student_id'])
+                ->lockForUpdate()
+                ->first();
 
-        $reference = trim(
-            (string) $validated['reference']
-        );
+            if (!$student) {
+                abort(422, 'Student does not exist.');
+            }
 
-        /*
-        |--------------------------------------------------------------------------
-        | DUPLICATE REFERENCE CHECK
-        |--------------------------------------------------------------------------
-        |
-        | The reference is the identifier used by:
-        |
-        | GET /api/v1/pos/payments/{reference}
-        |
-        */
 
-        $existingPayment = Perception::query()
-            ->where('reference', $reference)
-            ->first();
+            /*
+             * 4. Vérifier le contexte école / inscription /
+             * année académique.
+             *
+             * À adapter à tes modèles.
+             */
+            $inscription = $student->inscriptions()
+                ->where('school_id', $user->school_id)
+                ->where('annee_id', $user->annee_id)
+                ->lockForUpdate()
+                ->first();
 
-        if ($existingPayment) {
-            return response()->json([
-                'message' => 'This payment reference has already been processed.',
-
-                'reference' => $reference,
-
-                'payment' => [
-                    'id' => $existingPayment->id,
-                    'reference' => $existingPayment->reference,
-                    'amount' => (float) $existingPayment->montant,
-                    'currency' => $this->normalizeCurrency(
-                        $existingPayment->devise
-                    ),
-                    'paid_at' => $existingPayment->paid_at,
-                ],
-            ], 409);
-        }
-
-        /*
-        |--------------------------------------------------------------------------
-        | PROCESS PAYMENT
-        |--------------------------------------------------------------------------
-        */
-
-        try {
-            $result = DB::transaction(function () use (
-                $validated,
-                $annee,
-                $user,
-                $paymentCurrency,
-                $reference
-            ) {
-                /*
-                |--------------------------------------------------------------------------
-                | STUDENT IDENTIFIER
-                |--------------------------------------------------------------------------
-                */
-
-                $studentIdentifier = trim(
-                    (string) $validated['student_id']
+            if (!$inscription) {
+                abort(
+                    422,
+                    'Student does not have a valid enrollment for the current academic year.'
                 );
+            }
+
+
+            /*
+             * 5. Le backend prend la date.
+             *
+             * Ne jamais faire confiance à paid_at envoyé
+             * par le POS.
+             */
+            $paidAt = now();
+
+
+            /*
+             * 6. Génération du reçu côté serveur.
+             */
+            $receiptNumber = $this->generateReceiptNumber();
+
+
+            $createdPayments = [];
+            $totalAmount = 0;
+
+
+            /*
+             * 7. Traiter chaque frais.
+             */
+            foreach ($validated['items'] as $item) {
 
                 /*
-                |--------------------------------------------------------------------------
-                | FIND STUDENT
-                |--------------------------------------------------------------------------
-                */
-
-                $student = Eleve::query()
-                    ->where(function ($query) use ($studentIdentifier) {
-                        $query
-                            ->where(
-                                'id',
-                                $studentIdentifier
-                            )
-                            ->orWhere(
-                                'matricule',
-                                $studentIdentifier
-                            )
-                            ->orWhere(
-                                'numero_permanent',
-                                $studentIdentifier
-                            );
-                    })
-                    ->first();
-
-                if (! $student) {
-                    throw ValidationException::withMessages([
-                        'student_id' => [
-                            'Student not found.',
-                        ],
-                    ]);
-                }
-
-                /*
-                |--------------------------------------------------------------------------
-                | CURRENT INSCRIPTION
-                |--------------------------------------------------------------------------
-                */
-
-                $inscription = $student
-                    ->inscriptions()
-                    ->with('classe')
-                    ->where(
-                        'annee_id',
-                        $annee->id
-                    )
-                    ->first();
-
-                if (! $inscription) {
-                    throw ValidationException::withMessages([
-                        'student_id' => [
-                            'Student is not registered for the current academic year.',
-                        ],
-                    ]);
-                }
-
-                /*
-                |--------------------------------------------------------------------------
-                | DUPLICATE REFERENCE - TRANSACTION LOCK
-                |--------------------------------------------------------------------------
-                */
-
-                $duplicate = Perception::query()
-                    ->where(
-                        'reference',
-                        $reference
-                    )
+                 * IMPORTANT :
+                 * récupérer le frais dans la base avec lockForUpdate()
+                 * afin que deux POS ne puissent pas consommer
+                 * simultanément le même solde disponible.
+                 */
+                $fee = DB::table('frais')
+                    ->where('id', $item['fee_id'])
                     ->lockForUpdate()
                     ->first();
 
-                if ($duplicate) {
-                    throw ValidationException::withMessages([
-                        'reference' => [
-                            'This payment reference has already been processed.',
-                        ],
-                    ]);
+                if (!$fee) {
+                    abort(
+                        422,
+                        "Fee {$item['fee_id']} does not exist."
+                    );
                 }
 
-                /*
-                |--------------------------------------------------------------------------
-                | PAYMENT COLLECTION
-                |--------------------------------------------------------------------------
-                */
-
-                $payments = [];
-
-                $totalPaid = 0;
 
                 /*
-                |--------------------------------------------------------------------------
-                | PROCESS EACH FEE
-                |--------------------------------------------------------------------------
-                */
+                 * Vérifier que le frais appartient réellement
+                 * au contexte de l'étudiant.
+                 *
+                 * À adapter à ton modèle métier.
+                 */
+                $applicable = $this->feeIsApplicable(
+                    $fee,
+                    $student,
+                    $inscription
+                );
 
-                foreach (
-                    $validated['items']
-                    as $index => $item
-                ) {
-                    /*
-                    |--------------------------------------------------------------------------
-                    | FIND FEE
-                    |--------------------------------------------------------------------------
-                    */
-
-                    $fee = Frais::query()
-                        ->where(
-                            'id',
-                            $item['fee_id']
-                        )
-                        ->where(function ($query) use ($annee) {
-                            $query
-                                ->where(
-                                    'annee_id',
-                                    $annee->id
-                                )
-                                ->orWhereNull(
-                                    'annee_id'
-                                );
-                        })
-                        ->lockForUpdate()
-                        ->first();
-
-                    if (! $fee) {
-                        throw ValidationException::withMessages([
-                            "items.$index.fee_id" => [
-                                'Fee is not available for the current academic year.',
-                            ],
-                        ]);
-                    }
-
-                    /*
-                    |--------------------------------------------------------------------------
-                    | FEE CURRENCY
-                    |--------------------------------------------------------------------------
-                    */
-
-                    $feeCurrency = $fee->devise instanceof Devise
-                        ? $fee->devise->value
-                        : (string) $fee->devise;
-
-                    $feeCurrency = strtoupper(
-                        trim(
-                            $feeCurrency ?: 'USD'
-                        )
+                if (!$applicable) {
+                    abort(
+                        422,
+                        "Fee {$item['fee_id']} is not applicable to this student."
                     );
-
-                    /*
-                    |--------------------------------------------------------------------------
-                    | VERIFY CURRENCY
-                    |--------------------------------------------------------------------------
-                    */
-
-                    if ($feeCurrency !== $paymentCurrency) {
-                        throw ValidationException::withMessages([
-                            'currency' => [
-                                'The payment currency does not match fee '
-                                . $fee->id
-                                . '. Expected '
-                                . $feeCurrency
-                                . '.',
-                            ],
-                        ]);
-                    }
-
-                    /*
-                    |--------------------------------------------------------------------------
-                    | FEE AMOUNT
-                    |--------------------------------------------------------------------------
-                    */
-
-                    $amountDue = (float) $fee->montant;
-
-                    if ($amountDue <= 0) {
-                        throw ValidationException::withMessages([
-                            "items.$index.fee_id" => [
-                                'The selected fee has an invalid amount.',
-                            ],
-                        ]);
-                    }
-
-                    /*
-                    |--------------------------------------------------------------------------
-                    | PERIOD
-                    |--------------------------------------------------------------------------
-                    */
-
-                    $period = $item['period'] ?? null;
-
-                    /*
-                    |--------------------------------------------------------------------------
-                    | CALCULATE ALREADY PAID
-                    |--------------------------------------------------------------------------
-                    */
-
-                    $paidQuery = Perception::query()
-                        ->where(
-                            'inscription_id',
-                            $inscription->id
-                        )
-                        ->where(
-                            'annee_id',
-                            $annee->id
-                        )
-                        ->where(
-                            'frais_id',
-                            $fee->id
-                        )
-                        ->where(
-                            'devise',
-                            $paymentCurrency
-                        );
-
-                    if ($period !== null) {
-                        $paidQuery->where(
-                            'custom_property',
-                            $period
-                        );
-                    }
-
-                    $existingPerceptions = $paidQuery
-                        ->lockForUpdate()
-                        ->get();
-
-                    $amountPaid = (float) $existingPerceptions->sum(
-                        fn (Perception $perception) =>
-                        (float) $perception->montant
-                    );
-
-                    /*
-                    |--------------------------------------------------------------------------
-                    | OUTSTANDING
-                    |--------------------------------------------------------------------------
-                    */
-
-                    $outstanding = max(
-                        $amountDue - $amountPaid,
-                        0
-                    );
-
-                    /*
-                    |--------------------------------------------------------------------------
-                    | REQUESTED AMOUNT
-                    |--------------------------------------------------------------------------
-                    */
-
-                    $requestedAmount = (float) $item['amount'];
-
-                    /*
-                    |--------------------------------------------------------------------------
-                    | PREVENT OVERPAYMENT
-                    |--------------------------------------------------------------------------
-                    */
-
-                    if ($requestedAmount > $outstanding) {
-                        throw ValidationException::withMessages([
-                            "items.$index.amount" => [
-                                'The payment amount for fee '
-                                . $fee->id
-                                . ' exceeds the outstanding balance of '
-                                . $outstanding
-                                . ' '
-                                . $paymentCurrency
-                                . '.',
-                            ],
-                        ]);
-                    }
-
-                    /*
-                    |--------------------------------------------------------------------------
-                    | CREATE PERCEPTION
-                    |--------------------------------------------------------------------------
-                    */
-
-                    $perception = new Perception();
-
-                    /*
-                    |--------------------------------------------------------------------------
-                    | IMPORTANT
-                    |--------------------------------------------------------------------------
-                    |
-                    | This is now the real payment reference.
-                    |
-                    | Example:
-                    |
-                    | reference = 2610010
-                    |
-                    | GET:
-                    |
-                    | /api/v1/pos/payments/2610010
-                    |
-                    */
-
-                    $perception->reference = $reference;
-
-                    $perception->user_id =
-                        $user->id;
-
-                    $perception->frais_id =
-                        $fee->id;
-
-                    $perception->inscription_id =
-                        $inscription->id;
-
-                    $perception->annee_id =
-                        $annee->id;
-
-                    $perception->custom_property =
-                        $period;
-
-                    $perception->montant =
-                        $requestedAmount;
-
-                    /*
-                    |--------------------------------------------------------------------------
-                    | EXCHANGE RATE
-                    |--------------------------------------------------------------------------
-                    */
-
-                    $perception->taux = 1;
-
-                    /*
-                    |--------------------------------------------------------------------------
-                    | CURRENCY
-                    |--------------------------------------------------------------------------
-                    */
-
-                    $perception->devise =
-                        $paymentCurrency;
-
-                    /*
-                    |--------------------------------------------------------------------------
-                    | ORIGINAL FEE AMOUNT
-                    |--------------------------------------------------------------------------
-                    */
-
-                    $perception->frais_montant =
-                        $amountDue;
-
-                    /*
-                    |--------------------------------------------------------------------------
-                    | PAYMENT METHOD
-                    |--------------------------------------------------------------------------
-                    */
-
-                    $perception->paid_by =
-                        $validated['payment_method'];
-
-                    /*
-                    |--------------------------------------------------------------------------
-                    | PAYMENT DATE
-                    |--------------------------------------------------------------------------
-                    */
-
-                    $perception->paid_at =
-                        $validated['paid_at'];
-
-                    /*
-                    |--------------------------------------------------------------------------
-                    | DUE DATE
-                    |--------------------------------------------------------------------------
-                    */
-
-                    $perception->due_date =
-                        now()->toDateString();
-
-                    /*
-                    |--------------------------------------------------------------------------
-                    | SAVE
-                    |--------------------------------------------------------------------------
-                    */
-
-                    $perception->save();
-
-                    /*
-                    |--------------------------------------------------------------------------
-                    | NEW BALANCE
-                    |--------------------------------------------------------------------------
-                    */
-
-                    $newAmountPaid =
-                        $amountPaid +
-                        $requestedAmount;
-
-                    $newOutstanding = max(
-                        $amountDue -
-                        $newAmountPaid,
-                        0
-                    );
-
-                    /*
-                    |--------------------------------------------------------------------------
-                    | PAYMENT STATUS
-                    |--------------------------------------------------------------------------
-                    */
-
-                    if ($newAmountPaid <= 0) {
-                        $status = 'unpaid';
-                    } elseif ($newAmountPaid < $amountDue) {
-                        $status = 'partial';
-                    } else {
-                        $status = 'paid';
-                    }
-
-                    /*
-                    |--------------------------------------------------------------------------
-                    | PAYMENT RESPONSE
-                    |--------------------------------------------------------------------------
-                    */
-
-                    $payments[] = [
-                        'id' =>
-                            $perception->id,
-
-                        'reference' =>
-                            $perception->reference,
-
-                        'fee' => [
-                            'id' =>
-                                $fee->id,
-
-                            'name' =>
-                                trim(
-                                    (string) $fee->nom
-                                ),
-                        ],
-
-                        'period' =>
-                            $period,
-
-                        'amount_due' =>
-                            $amountDue,
-
-                        'amount' =>
-                            $requestedAmount,
-
-                        'amount_paid' =>
-                            $newAmountPaid,
-
-                        'outstanding' =>
-                            $newOutstanding,
-
-                        'currency' =>
-                            $paymentCurrency,
-
-                        'status' =>
-                            $status,
-
-                        'payment_method' =>
-                            $validated['payment_method'],
-
-                        'paid_at' =>
-                            $perception->paid_at,
-                    ];
-
-                    $totalPaid +=
-                        $requestedAmount;
                 }
 
+
                 /*
-                |--------------------------------------------------------------------------
-                | RETURN TRANSACTION RESULT
-                |--------------------------------------------------------------------------
-                */
+                 * Vérifier la devise.
+                 */
+                if ($fee->devise !== $validated['currency']) {
+                    abort(
+                        422,
+                        'The payment currency does not match the fee currency.'
+                    );
+                }
 
-                return [
-                    'student' =>
-                        $student,
 
-                    'inscription' =>
-                        $inscription,
+                /*
+                 * Calcul du solde restant côté serveur.
+                 */
+                $outstandingBalance = $this->calculateOutstandingBalance(
+                    $student,
+                    $fee,
+                    $inscription
+                );
 
-                    'payments' =>
-                        $payments,
 
-                    'total_paid' =>
-                        $totalPaid,
-                ];
-            });
-        } catch (ValidationException $exception) {
-            throw $exception;
-        } catch (Throwable $exception) {
-            report($exception);
+                $requestedAmount = (float) $item['amount'];
+
+
+                /*
+                 * Le montant final est contrôlé côté backend.
+                 */
+                if ($requestedAmount > $outstandingBalance) {
+                    abort(
+                        422,
+                        "Payment amount exceeds the outstanding balance for fee {$item['fee_id']}."
+                    );
+                }
+
+
+                /*
+                 * Le backend peut également recalculer les valeurs
+                 * financières au lieu de faire confiance au POS.
+                 */
+                $amount = $requestedAmount;
+
+                $totalAmount += $amount;
+
+
+                /*
+                 * Création de la perception.
+                 */
+                $payment = Perception::create([
+
+                    'reference' => $receiptNumber,
+
+                    'user_id' => $user->id,
+
+                    'frais_id' => $fee->id,
+
+                    'inscription_id' => $inscription->id,
+
+                    'annee_id' => $inscription->annee_id,
+
+                    'custom_property' => [
+                        'client_payment_id' => $validated['client_payment_id'],
+                        'device_id' => $validated['device_id'],
+                        'student_id' => $student->id,
+                        'payment_method' => $validated['payment_method'],
+                    ],
+
+                    'montant' => $amount,
+
+                    'taux' => $fee->taux ?? 1,
+
+                    'devise' => $validated['currency'],
+
+                    'frais_montant' => $fee->montant,
+
+                    'paid_by' => $student->id,
+
+                    /*
+                     * Date générée par le backend.
+                     */
+                    'paid_at' => $paidAt,
+
+                    'due_date' => $fee->due_date ?? null,
+                ]);
+
+                $createdPayments[] = $payment;
+            }
+
+
+            /*
+             * 8. Retour API.
+             *
+             * Ici on retourne le premier paiement si ton
+             * endpoint représente une perception unique.
+             */
+            $payment = $createdPayments[0];
 
             return response()->json([
-                'message' =>
-                    'Payment could not be processed.',
-            ], 500);
-        }
+                'data' => [
+                    'id' => $payment->id,
 
-        return response()->json([
-            'data' => [
-                /*
-                |--------------------------------------------------------------------------
-                | PAYMENT
-                |--------------------------------------------------------------------------
-                */
+                    'client_payment_id' =>
+                        $validated['client_payment_id'],
 
-                'id' =>
-                    $result['payments'][0]['id'] ?? null,
+                    'receipt_number' =>
+                        $receiptNumber,
 
-                'reference' =>
-                    $reference,
+                    'status' => 'completed',
 
-                'client_payment_id' =>
-                    $validated['client_payment_id'] ?? null,
+                    'student' => [
+                        'id' => $student->id,
+                        'name' => $student->name,
+                    ],
 
-                'receipt_number' =>
-                    $validated['receipt_number'] ?? null,
+                    'amount' => $totalAmount,
 
-                'device_id' =>
-                    $validated['device_id'],
+                    'currency' => $validated['currency'],
 
-                'status' =>
-                    'completed',
+                    'payment_method' =>
+                        $validated['payment_method'],
 
-                /*
-                |--------------------------------------------------------------------------
-                | STUDENT
-                |--------------------------------------------------------------------------
-                */
-
-                'student' => [
-                    'id' =>
-                        $result['student']->id,
-
-                    'name' =>
-                        trim(
-                            (string) $result['student']->nom
-                        ),
-
-                    'matricule' =>
-                        $result['student']->matricule,
-
-                    'class' =>
-                        $result['inscription']
-                            ->classe
-                            ?->code,
+                    /*
+                     * Date générée par le serveur.
+                     */
+                    'paid_at' =>
+                        $paidAt->toIso8601String(),
                 ],
-
-                /*
-                |--------------------------------------------------------------------------
-                | AMOUNT
-                |--------------------------------------------------------------------------
-                */
-
-                'amount' =>
-                    $result['total_paid'],
-
-                'currency' =>
-                    strtoupper(
-                        $validated['currency']
-                    ),
-
-                /*
-                |--------------------------------------------------------------------------
-                | PAYMENT METHOD
-                |--------------------------------------------------------------------------
-                */
-
-                'payment_method' =>
-                    $validated['payment_method'],
-
-                /*
-                |--------------------------------------------------------------------------
-                | DATE
-                |--------------------------------------------------------------------------
-                */
-
-                'paid_at' =>
-                    $validated['paid_at'],
-
-                /*
-                |--------------------------------------------------------------------------
-                | ITEMS
-                |--------------------------------------------------------------------------
-                */
-
-                'items' =>
-                    $result['payments'],
-            ],
-        ], 201);
+            ], 201);
+        });
     }
 
-    /**
-     * Get a payment by reference.
-     *
-     * Example:
-     *
-     * GET /api/v1/pos/payments/2610010
-     */
+
+    private function generateReceiptNumber(): string
+    {
+        do {
+            $number =
+                'REC-' .
+                now()->format('Y') .
+                '-' .
+                str_pad(
+                    (string) random_int(1, 9999999),
+                    7,
+                    '0',
+                    STR_PAD_LEFT
+                );
+
+        } while (
+            Perception::where('reference', $number)->exists()
+        );
+
+        return $number;
+    }
+
+
+    private function feeIsApplicable(
+        $fee,
+        $student,
+        $inscription
+    ): bool {
+        /*
+         * À adapter à tes règles métier.
+         *
+         * Exemple :
+         *
+         * return $fee->annee_id === $inscription->annee_id;
+         */
+
+        return true;
+    }
+
+
+    private function calculateOutstandingBalance(
+        $student,
+        $fee,
+        $inscription
+    ): float {
+        /*
+         * À remplacer par ton vrai calcul financier.
+         *
+         * Exemple conceptuel :
+         *
+         * frais total
+         * - paiements déjà effectués
+         * = solde restant
+         */
+
+        $alreadyPaid = Perception::query()
+            ->where('frais_id', $fee->id)
+            ->where('inscription_id', $inscription->id)
+            ->sum('montant');
+
+        $balance = (float) $fee->montant - (float) $alreadyPaid;
+
+        return max(0, $balance);
+    }
+
+
+    private function paymentResponse(Perception $payment)
+    {
+        return [
+            'id' => $payment->id,
+
+            'client_payment_id' =>
+                data_get(
+                    $payment->custom_property,
+                    'client_payment_id'
+                ),
+
+            'receipt_number' =>
+                $payment->reference,
+
+            'status' => 'completed',
+
+            'student' => [
+                'id' => $payment->paid_by,
+            ],
+
+            'amount' =>
+                (float) $payment->montant,
+
+            'currency' =>
+                $payment->devise,
+
+            'paid_at' =>
+                optional($payment->paid_at)->toIso8601String(),
+        ];
+    }
+
     public function show(string $reference): JsonResponse
     {
 
