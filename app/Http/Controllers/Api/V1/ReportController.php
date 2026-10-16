@@ -38,12 +38,12 @@ class ReportController extends Controller
         $start = $start ? Carbon::parse($start)->startOfDay() : null;
         $end   = $end ? Carbon::parse($end)->endOfDay() : null;
 
-        // Totaux de la période
+
         $income   = $this->incomeTotal($currency, $start, $end);
         $expenses = $this->expensesTotal($currency, $start, $end);
         $balance  = round($income - $expenses, 2);
 
-        // Graphique : exactement 6 mois, jusqu'à la fin de période (plafonnée à aujourd'hui)
+
         $chartEnd = ($end && $end->lt(now())) ? $end->copy() : now();
         $lastMonth = $chartEnd->copy()->startOfMonth();
 

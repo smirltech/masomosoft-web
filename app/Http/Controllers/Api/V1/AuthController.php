@@ -11,9 +11,7 @@ use Illuminate\Validation\ValidationException;
 
 class AuthController extends Controller
 {
-    /**
-     * Authenticate a Manager mobile user.
-     */
+
     public function login(Request $request): JsonResponse
     {
         $credentials = $request->validate([
@@ -30,13 +28,6 @@ class AuthController extends Controller
             ]);
         }
 
-        /*
-         * Manager access verification should use the existing
-         * application's role/permission system.
-         *
-         * Do not create a second authorization system here.
-         */
-
         $deviceName = $credentials['device_name']
             ?? 'MasomoSoft Manager';
 
@@ -51,14 +42,13 @@ class AuthController extends Controller
                     'name' => $user->name,
                     'email' => $user->email,
                     'role' => $this->getUserRole($user),
+                    'device_role' => $this->getDeviceRole($user),
                 ],
             ],
         ]);
     }
 
-    /**
-     * Logout the current device/session.
-     */
+
     public function logout(Request $request): JsonResponse
     {
         $request->user()
@@ -70,9 +60,7 @@ class AuthController extends Controller
         ]);
     }
 
-    /**
-     * Return the currently authenticated user.
-     */
+
     public function me(Request $request): JsonResponse
     {
         $user = $request->user();
@@ -87,24 +75,48 @@ class AuthController extends Controller
         ]);
     }
 
-    /**
-     * Resolve the user's role from the existing authorization system.
-     */
+
     private function getUserRole(User $user): ?string
     {
-        /*
-         * If the project uses Spatie Permission:
-         *
-         * return $user->getRoleNames()->first();
-         *
-         * Otherwise adapt this method to the existing User/Role
-         * implementation.
-         */
-
         if (method_exists($user, 'getRoleNames')) {
             return $user->getRoleNames()->first();
         }
 
         return $user->role ?? null;
+    }
+
+
+    private function getDeviceRole(User $user): string
+    {
+        // Check the explicit financial role.
+        if (
+            method_exists($user, 'hasRole')
+            && $user->hasRole('financier')
+        ) {
+            return 'pos';
+        }
+
+
+        if (method_exists($user, 'getAllPermissions')) {
+            $financePrefixes = [
+                'depenses.',
+                'revenus.',
+                'frais.',
+                'perceptions.',
+            ];
+
+            $permissions = $user->getAllPermissions()
+                ->pluck('name');
+
+            foreach ($permissions as $permission) {
+                foreach ($financePrefixes as $prefix) {
+                    if (str_starts_with($permission, $prefix)) {
+                        return 'pos';
+                    }
+                }
+            }
+        }
+
+        return 'user';
     }
 }
