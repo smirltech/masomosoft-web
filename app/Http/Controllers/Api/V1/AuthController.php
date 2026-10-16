@@ -11,12 +11,23 @@ use Illuminate\Validation\ValidationException;
 
 class AuthController extends Controller
 {
+    private const DEVICE_ROLE_POS  = 'pos';
+    private const DEVICE_ROLE_USER = 'user';
+
+    private const POS_ROLES = ['financier'];
+
+    private const FINANCE_PERMISSION_PREFIXES = [
+        'depenses.',
+        'revenus.',
+        'frais.',
+        'perceptions.',
+    ];
 
     public function login(Request $request): JsonResponse
     {
         $credentials = $request->validate([
-            'email' => ['required', 'string'],
-            'password' => ['required', 'string'],
+            'email'       => ['required', 'string'],
+            'password'    => ['required', 'string'],
             'device_name' => ['nullable', 'string', 'max:255'],
         ]);
 
@@ -28,54 +39,45 @@ class AuthController extends Controller
             ]);
         }
 
-        $deviceName = $credentials['device_name']
-            ?? 'MasomoSoft Manager';
 
-        $token = $user->createToken($deviceName)->plainTextToken;
+        $tokenName = $credentials['device_name'] ?? 'MasomoSoft Manager';
+
+        $token = $user->createToken($tokenName)->plainTextToken;
 
         return response()->json([
             'data' => [
                 'token' => $token,
-
-                'user' => [
-                    'id' => $user->id,
-                    'name' => $user->name,
-                    'email' => $user->email,
-                    'role' => $this->getUserRole($user),
-                    'device_role' => $this->getDeviceRole($user),
-                ],
+                'user'  => $this->formatUser($user),
             ],
         ]);
     }
 
-
     public function logout(Request $request): JsonResponse
     {
-        $request->user()
-            ->currentAccessToken()
-            ?->delete();
+        $request->user()->currentAccessToken()?->delete();
 
         return response()->json([
             'message' => 'Successfully logged out.',
         ]);
     }
 
-
-
     public function me(Request $request): JsonResponse
     {
-        $user = $request->user();
-
         return response()->json([
-            'data' => [
-                'id' => $user->id,
-                'name' => $user->name,
-                'email' => $user->email,
-                'role' => $this->getUserRole($user),
-            ],
+            'data' => $this->formatUser($request->user()),
         ]);
     }
 
+    private function formatUser(User $user): array
+    {
+        return [
+            'id'          => $user->id,
+            'name'        => $user->name,
+            'email'       => $user->email,
+            'role'        => $this->getUserRole($user),
+            'device_role' => $this->getDeviceRole($user),
+        ];
+    }
 
     private function getUserRole(User $user): ?string
     {
@@ -89,35 +91,20 @@ class AuthController extends Controller
 
     private function getDeviceRole(User $user): string
     {
-        // Check the explicit financial role.
-        if (
-            method_exists($user, 'hasRole')
-            && $user->hasRole('financier')
-        ) {
-            return 'pos';
+        if (method_exists($user, 'hasAnyRole') && $user->hasAnyRole(self::POS_ROLES)) {
+            return self::DEVICE_ROLE_POS;
         }
 
-
         if (method_exists($user, 'getAllPermissions')) {
-            $financePrefixes = [
-                'depenses.',
-                'revenus.',
-                'frais.',
-                'perceptions.',
-            ];
-
-            $permissions = $user->getAllPermissions()
-                ->pluck('name');
-
-            foreach ($permissions as $permission) {
-                foreach ($financePrefixes as $prefix) {
+            foreach ($user->getAllPermissions()->pluck('name') as $permission) {
+                foreach (self::FINANCE_PERMISSION_PREFIXES as $prefix) {
                     if (str_starts_with($permission, $prefix)) {
-                        return 'pos';
+                        return self::DEVICE_ROLE_POS;
                     }
                 }
             }
         }
 
-        return 'user';
+        return self::DEVICE_ROLE_USER;
     }
 }
