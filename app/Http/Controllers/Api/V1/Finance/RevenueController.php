@@ -52,6 +52,7 @@ class RevenueController extends Controller
         ]);
     }
 
+
     public function show(string $id): JsonResponse
     {
         $annee = Annee::encours();
@@ -76,21 +77,31 @@ class RevenueController extends Controller
             : $perception->devise;
 
         return [
-            'id'      => $perception->id,
+            'id' => $perception->id,
+
             'student' => [
-                'id'   => $eleve?->id,
-                'name' => $eleve?->nom_complet ?? trim(($eleve?->nom ?? '') . ' ' . ($eleve?->prenom ?? '')),
+                'id' => $eleve?->id,
+                'name' => $eleve?->nom_complet
+                    ?? trim(($eleve?->nom ?? '') . ' ' . ($eleve?->prenom ?? '')),
             ],
+
             'class' => $perception->inscription?->classe?->nom,
-            'fee'   => [
-                'name'   => $perception->frais?->nom,
+
+            'fee' => [
+                'name' => $perception->frais?->nom,
                 'period' => $perception->mois ?? null,
             ],
-            'amount_due'  => (float) $perception->frais_montant,
+
+            'amount_due' => (float) $perception->frais_montant,
             'amount_paid' => (float) $perception->montant,
-            'currency'    => $currency,
-            'date'        => $perception->paid_at?->toIso8601String(),
-            'cashier'     => $perception->user?->name,
+            'currency' => $currency,
+
+            'date' => $perception->paid_at
+                ? \Carbon\Carbon::parse($perception->paid_at)->toIso8601String()
+                : null,
+
+            'cashier' => $perception->user?->name,
         ];
     }
+
 }
