@@ -1,6 +1,7 @@
 <?php
 
 
+use App\Http\Controllers\Admin\NotificationController;
 use App\Http\Controllers\Api\V1\AuthController;
 use App\Http\Controllers\Api\V1\ContextController;
 use App\Http\Controllers\Api\V1\DashboardController;
@@ -83,6 +84,17 @@ Route::prefix('v1')->group(function () {
             Route::get('/expenses', [ExpenseController::class, 'index']);
             Route::get('/expenses/{id}', [ExpenseController::class, 'show']);
         });
+
+        Route::get('/reports/financial', [ReportController::class, 'financial']);
+
+//        Route::get('/profile', [ProfileController::class, 'show']);
+//        Route::get('/settings', [SettingsController::class, 'show']);
+//
+//
+//        Route::prefix('notifications')->group(function () {
+//            Route::get('/', [NotificationController::class, 'index']);
+//            Route::patch('/{id}/read', [NotificationController::class, 'markAsRead']);
+//        });
 
     });
 

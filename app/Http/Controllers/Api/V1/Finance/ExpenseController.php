@@ -12,25 +12,32 @@ class ExpenseController extends Controller
 {
     public function index(Request $request): JsonResponse
     {
-        $dateDebut = $request->input('date_debut');
-        $dateFin = $request->input('date_fin');
+        $request->validate([
+            'start_date' => ['nullable', 'date'],
+            'end_date'   => ['nullable', 'date', 'after_or_equal:start_date'],
+            'date_debut' => ['nullable', 'date'],
+            'date_fin'   => ['nullable', 'date', 'after_or_equal:date_debut'],
+            'currency'   => ['nullable', 'in:USD,CDF'],
+            'type_id'    => ['nullable', 'integer'],
+            'status'     => ['nullable', 'string'],
+            'search'     => ['nullable', 'string', 'max:255'],
+            'per_page'   => ['nullable', 'integer', 'min:1', 'max:100'],
+        ]);
 
-        if (!$dateDebut || !$dateFin) {
-            $annee = Annee::encours();
+
+        $dateDebut = $request->input('start_date', $request->input('date_debut'));
+        $dateFin   = $request->input('end_date', $request->input('date_fin'));
+
+        if (! $dateDebut || ! $dateFin) {
+            $annee     = Annee::encours();
             $dateDebut = $dateDebut ?? $annee?->date_debut;
-            $dateFin = $dateFin ?? $annee?->date_fin;
+            $dateFin   = $dateFin ?? $annee?->date_fin;
         }
 
         $baseQuery = Depense::query()
-            ->when($dateDebut && $dateFin, function ($query) use ($dateDebut, $dateFin) {
-                $query->whereBetween('date', [$dateDebut, $dateFin]);
-            });
-
-
-        $baseQuery
+            ->when($dateDebut && $dateFin, fn ($q) => $q->whereBetween('date', [$dateDebut, $dateFin]))
             ->when($request->filled('type_id'), fn ($q) => $q->where('depense_type_id', $request->input('type_id')))
             ->when($request->filled('status'), function ($q) use ($request) {
-
                 $q->whereHas('statuses', function ($sub) use ($request) {
                     $sub->where('name', $request->input('status'))
                         ->whereIn('id', function ($inner) {
@@ -52,16 +59,15 @@ class ExpenseController extends Controller
 
 
         $totaux = (clone $baseQuery)
-            ->selectRaw('devise, SUM(montant) as total')
+            ->selectRaw('devise, COALESCE(SUM(montant), 0) as total')
             ->groupBy('devise')
             ->pluck('total', 'devise');
 
-        $perPage = (int) $request->input('per_page', 15);
-
         $depenses = (clone $baseQuery)
-            ->with('type')
+            ->when($request->filled('currency'), fn ($q) => $q->where('devise', $request->input('currency')))
+            ->with(['type', 'user'])
             ->latest('date')
-            ->paginate($perPage)
+            ->paginate((int) $request->input('per_page', 20))
             ->withQueryString();
 
         return response()->json([
@@ -74,23 +80,21 @@ class ExpenseController extends Controller
                 ->values(),
             'pagination' => [
                 'current_page' => $depenses->currentPage(),
-                'per_page' => $depenses->perPage(),
-                'total' => $depenses->total(),
-                'last_page' => $depenses->lastPage(),
-                'from' => $depenses->firstItem(),
-                'to' => $depenses->lastItem(),
+                'per_page'     => $depenses->perPage(),
+                'total'        => $depenses->total(),
+                'last_page'    => $depenses->lastPage(),
+                'has_more'     => $depenses->hasMorePages(),
             ],
-            'periode' => [
-                'date_debut' => $dateDebut,
-                'date_fin' => $dateFin,
+            'period' => [
+                'start_date' => $dateDebut,
+                'end_date'   => $dateFin,
             ],
         ]);
     }
 
-
-    public function show(string $id): JsonResponse
+    public function show(int $id): JsonResponse
     {
-        $depense = Depense::with('type')->findOrFail($id);
+        $depense = Depense::with(['type', 'user'])->findOrFail($id);
 
         return response()->json([
             'data' => $this->transform($depense),
@@ -100,20 +104,20 @@ class ExpenseController extends Controller
     private function transform(Depense $depense): array
     {
         return [
-            'id' => $depense->id,
-            'reference' => $depense->reference,
-            'description' => $depense->motif,
-            'category' => $depense->categorie?->value,
-            'type' => $depense->type?->nom,
-            'beneficiary' => $depense->beneficiaire,
-            'amount' => (float) $depense->montant,
-            'currency' => $depense->devise?->value,
-            'date' => optional($depense->date)->format('Y-m-d'),
-            'status' => $depense->status(),
-            'note' => $depense->note,
-            'validated_at' => optional($depense->validated_at)->toDateTimeString(),
-            'created_by' => $depense->user?->name,
-            'created_at' => optional($depense->created_at)->toDateTimeString(),
+            'id'           => $depense->id,
+            'reference'    => $depense->reference,
+            'description'  => $depense->motif,
+            'category'     => $depense->categorie?->value,
+            'type'         => $depense->type?->nom,
+            'beneficiary'  => $depense->beneficiaire,
+            'amount'       => (float) $depense->montant,
+            'currency'     => $depense->devise?->value,
+            'date'         => optional($depense->date)->format('Y-m-d'),
+            'status'       => $depense->status(),
+            'note'         => $depense->note,
+            'validated_at' => optional($depense->validated_at)->toIso8601String(),
+            'created_by'   => $depense->user?->name,
+            'created_at'   => optional($depense->created_at)->toIso8601String(),
         ];
     }
 }

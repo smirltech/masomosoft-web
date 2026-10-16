@@ -1,39 +1,22 @@
-@php use App\Enums\FraisType;use App\Enums\RevenuType;use App\Models\Annee;use App\Models\Depense;use App\Models\DepenseType;use App\Models\Perception;use App\Models\Revenu;use Illuminate\Support\Carbon;use Illuminate\Support\Facades\DB; @endphp
-
-@php
-    $soldeCDF = DB::table('perceptions')
-            ->where('devise', 'CDF')
-            ->sum('montant') +
-            DB::table('revenus')
-            ->where('devise', 'CDF')
-            ->sum('montant') -
-            DB::table('depenses')
-            ->where('devise', 'CDF')
-            ->sum('montant');
-
-    $soldeUSD =  DB::table('perceptions')
-            ->where('devise', 'USD')
-            ->sum('montant') +
-            DB::table('revenus')
-            ->where('devise', 'USD')
-            ->sum('montant') -
-            DB::table('depenses')
-            ->where('devise', 'USD')
-            ->sum('montant');
-@endphp
+@php use App\Enums\RevenuType;use App\Models\Annee;use App\Models\Depense;use App\Models\DepenseType;use App\Models\Revenu;use Illuminate\Support\Carbon; @endphp
 <div>
     <div class="">
         <div style="text-align: center;" class=" justify-content-center">
-            CENK FINANCE - {{$anneeNom}}
+            CENK FINANCE
         </div>
         <br>
     </div>
     <div class="">
         <div class="card">
             <div style="display: flex; justify-content: space-between" class="card-header">
-                <div class="card-title">Rapport financier de la période
-                    du {{Carbon::parse($date_from)->format('d/m/Y')}}
-                    au {{Carbon::parse($date_to)->format('d/m/Y')}}</div>
+                <div class="card-title">
+                    @if($isSectionReport)
+                        Rapport financier — Section : {{$selectedSectionName}}
+                    @else
+                        Rapport financier de la période
+                    @endif
+                    <div>Du {{Carbon::parse($date_from)->format('d/m/Y')}} au {{Carbon::parse($date_to)->format('d/m/Y')}} — Année scolaire : {{$anneeNom}}</div>
+                </div>
                 <div class="card-tools d-flex">
                     <div class="ml-2"> Compte : {{auth()->user()->name}}</div>
                     <div class="ml-2"> Date : {{Carbon::now()->format('d-m-Y H:i')}}</div>
@@ -41,6 +24,13 @@
             </div>
             <div class="card-body m-b-5">
                 <div class="row">
+                    @if($isSectionReport)
+                        <div class="col-12">
+                            <div class="alert alert-info py-2">
+                                Les revenus auxiliaires, les dépenses et les soldes consolidés sont exclus de ce rapport, car ils ne sont pas attribuables de manière fiable à cette section.
+                            </div>
+                        </div>
+                    @endif
                     <div class="col-md-6">
                         <h4>ENTREES</h4>
                         <hr>
@@ -64,60 +54,29 @@
                                     </tr>
                                     </thead>
                                     <tbody>
-                                    @php
-
-
-                                        $perceptionCDFCountTotal = 0;
-                                        $perceptionUSDCountTotal = 0;
-
-                                        $perceptionCDFTotal = 0;
-                                        $perceptionUSDTotal = 0;
-                                    @endphp
-                                    @foreach(FraisType::cases() as $k=>$type)
-                                        @php
-                                            $perceptionQuery = Perception::whereHas('frais', function ($q) use ($type) {
-                                                $q->where('type', $type);
-                                            })
-                                            ->whereDate('created_at', '>=', $date_from)
-                                            ->whereDate('created_at', '<=', $date_to);
-
-                                            $perceptionCDFCount = $perceptionQuery->clone()->cdf()->count();
-                                            $perceptionUSDCount = $perceptionQuery->clone()->usd()->count();
-
-                                            $perceptionCDF = $perceptionQuery->clone()->cdf()->sum('montant');
-                                            $perceptionUSD = $perceptionQuery->clone()->usd()->sum('montant');
-
-                                               if(!$perceptionUSDCount && !$perceptionCDFCount){
-                                                continue;
-                                            }
-
-                                            $perceptionCDFCountTotal += $perceptionCDFCount;
-                                            $perceptionUSDCountTotal += $perceptionUSDCount;
-                                            $perceptionCDFTotal += $perceptionCDF;
-                                            $perceptionUSDTotal += $perceptionUSD;
-
-
-                                        @endphp
+                                    @foreach($perceptionDetails as $detail)
+                                        @if(!$detail['cdf_count'] && !$detail['usd_count'])
+                                            @continue
+                                        @endif
                                         <tr class="titres">
-                                            <td style="text-align: left">{{$type->label()}}</td>
-                                            <td class="text-center">{{$perceptionCDFCount}}</td>
-                                            <td class="text-center">{{number_format($perceptionCDF)}}</td>
-                                            <td class="text-center">{{$perceptionUSDCount}}</td>
-                                            <td class="text-center">{{number_format($perceptionUSD)}}</td>
+                                            <td style="text-align: left">{{$detail['label']}}</td>
+                                            <td class="text-center">{{$detail['cdf_count']}}</td>
+                                            <td class="text-center">{{number_format($detail['cdf_montant'])}}</td>
+                                            <td class="text-center">{{$detail['usd_count']}}</td>
+                                            <td class="text-center">{{number_format($detail['usd_montant'])}}</td>
                                         </tr>
-
                                     @endforeach
                                     <tr class="titres">
                                         <th>Total</th>
-                                        <th class="text-center">{{number_format($perceptionCDFCountTotal)}}</th>
-                                        <th class="text-center">{{number_format($perceptionCDFTotal)}}Fc</th>
-                                        <th class="text-center">{{number_format($perceptionUSDCountTotal)}}</th>
-                                        <th class="text-center">{{number_format($perceptionUSDTotal)}}$</th>
+                                        <th class="text-center">{{number_format($perceptionTotals['cdf_count'])}}</th>
+                                        <th class="text-center">{{number_format($perceptionTotals['cdf_montant'])}}Fc</th>
+                                        <th class="text-center">{{number_format($perceptionTotals['usd_count'])}}</th>
+                                        <th class="text-center">{{number_format($perceptionTotals['usd_montant'])}}$</th>
                                     </tr>
                                     </tbody>
                                 </table>
                             @endif
-                            @if($revenuAuxiliaire != 0)
+                            @if(!$isSectionReport && $revenuAuxiliaire != 0)
                                 <li class="list-group-item d-flex justify-content-between align-items-center">
                                     <strong>Revenus Auxiliaires</strong>
                                 </li>
@@ -178,6 +137,7 @@
                             @endif
                         </ol>
                     </div>
+                    @if(!$isSectionReport)
                     <div class="col-md-6">
                         <h4>SORTIES</h4>
                         <hr>
@@ -257,6 +217,7 @@
 
                         </ol>
                     </div>
+                    @endif
                 </div>
             </div>
         </div>
