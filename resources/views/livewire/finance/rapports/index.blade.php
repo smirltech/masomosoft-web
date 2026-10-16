@@ -21,7 +21,7 @@
     <div style="display: flex; width: 100%" class="card-header justify-content-center mb-3">
         <div class="card-tools">
             <div style="display: flex;" class="row">
-                <div style="flex: 50%;" class="col-sm-6">
+                <div class="col-sm-4">
                     <div style="display: flex;" class="input-group">
                         <div class="input-group-prepend">
                             <span class="input-group-text" id="date_from">Debut : </span>
@@ -31,7 +31,7 @@
                                class="form-control">
                     </div>
                 </div>
-                <div style="flex: 50%;" class="col-sm-6">
+                <div class="col-sm-4">
                     <div style="display: flex;" class="input-group">
                         <div class="input-group-prepend">
                             <span class="input-group-text" id="date_to">Fin : </span>
@@ -42,6 +42,20 @@
                                placeholder="date fin"
                                type="date" wire:model="date_to"
                                class="form-control">
+                    </div>
+                </div>
+                <div class="col-sm-4">
+                    <div style="display: flex;" class="input-group">
+                        <div class="input-group-prepend">
+                            <span class="input-group-text" id="section_id">Section : </span>
+                        </div>
+                        <select aria-label="section_id" aria-describedby="section_id" wire:model="section_id"
+                                class="form-control">
+                            <option value="">Toutes les sections</option>
+                            @foreach($sections as $section)
+                                <option value="{{ $section->id }}">{{ $section->nom }}</option>
+                            @endforeach
+                        </select>
                     </div>
                 </div>
             </div>
