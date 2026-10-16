@@ -51,4 +51,46 @@ class RevenueController extends Controller
             ],
         ]);
     }
+
+    public function show(int $id): JsonResponse
+    {
+        $annee = Annee::encours();
+
+        $perception = Perception::query()
+            ->whereNotNull('paid_at')
+            ->when($annee, fn ($query) => $query->where('annee_id', $annee->id))
+            ->with(['inscription.eleve', 'inscription.classe', 'frais', 'user'])
+            ->findOrFail($id);
+
+        return response()->json([
+            'data' => $this->transform($perception),
+        ]);
+    }
+
+    private function transform(Perception $perception): array
+    {
+        $eleve = $perception->inscription?->eleve;
+
+        $currency = $perception->devise instanceof \BackedEnum
+            ? $perception->devise->value
+            : $perception->devise;
+
+        return [
+            'id'      => $perception->id,
+            'student' => [
+                'id'   => $eleve?->id,
+                'name' => $eleve?->nom_complet ?? trim(($eleve?->nom ?? '') . ' ' . ($eleve?->prenom ?? '')),
+            ],
+            'class' => $perception->inscription?->classe?->nom,
+            'fee'   => [
+                'name'   => $perception->frais?->nom,
+                'period' => $perception->mois ?? null,
+            ],
+            'amount_due'  => (float) $perception->frais_montant,
+            'amount_paid' => (float) $perception->montant,
+            'currency'    => $currency,
+            'date'        => $perception->paid_at?->toIso8601String(),
+            'cashier'     => $perception->user?->name,
+        ];
+    }
 }

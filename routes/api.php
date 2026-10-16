@@ -75,6 +75,15 @@ Route::prefix('v1')->group(function () {
             'index'
         ]);
 
+        Route::prefix('finance')->group(function () {
+
+            Route::get('/receipts', [RevenueController::class, 'index']);
+            Route::get('/receipts/{id}', [RevenueController::class, 'show']);
+
+            Route::get('/expenses', [ExpenseController::class, 'index']);
+            Route::get('/expenses/{id}', [ExpenseController::class, 'show']);
+        });
+
     });
 
 });
