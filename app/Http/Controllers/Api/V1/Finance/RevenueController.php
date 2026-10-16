@@ -52,7 +52,7 @@ class RevenueController extends Controller
         ]);
     }
 
-    public function show(int $id): JsonResponse
+    public function show(string $id): JsonResponse
     {
         $annee = Annee::encours();
 

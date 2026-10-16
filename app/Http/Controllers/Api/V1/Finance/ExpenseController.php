@@ -92,7 +92,7 @@ class ExpenseController extends Controller
         ]);
     }
 
-    public function show(int $id): JsonResponse
+    public function show(string $id): JsonResponse
     {
         $depense = Depense::with(['type', 'user'])->findOrFail($id);
 
