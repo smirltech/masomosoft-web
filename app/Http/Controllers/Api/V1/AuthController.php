@@ -17,9 +17,6 @@ class AuthController extends Controller
     private const POS_ROLES = ['financier'];
 
     private const FINANCE_PERMISSION_PREFIXES = [
-        'depenses.',
-        'revenus.',
-        'frais.',
         'perceptions.',
     ];
 
