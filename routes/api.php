@@ -64,6 +64,11 @@ Route::prefix('v1')->group(function () {
                 'store'
             ]);
 
+             Route::post('/payments1', [
+                PosPaymentController::class,
+                'store'
+            ]);
+
             Route::get('/payments/{reference}', [
                 PosPaymentController::class,
                 'show'
