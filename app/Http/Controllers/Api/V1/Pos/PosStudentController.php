@@ -3,6 +3,7 @@
 namespace App\Http\Controllers\Api\V1\Pos;
 
 use App\Http\Controllers\Controller;
+use App\Http\Resources\Api\V1\POS\StudentResource;
 use App\Models\Annee;
 use App\Models\Eleve;
 use App\Models\Frais;
@@ -15,6 +16,8 @@ class PosStudentController extends Controller
 {
     public function index(Request $request): JsonResponse
     {
+
+
         $search = trim(
             (string) $request->input('search', '')
         );
@@ -26,11 +29,6 @@ class PosStudentController extends Controller
             ),
             10
         );
-        if ($search === '') {
-            return response()->json([
-                'data' => [],
-            ]);
-        }
 
         $anneeId = Annee::id();
 
@@ -64,33 +62,12 @@ class PosStudentController extends Controller
 
                 },
             ])
-            ->limit($limit)
-            ->get();
+            ->paginate($limit);
 
-        return response()->json([
-            'data' => $students
-                ->map(function (Eleve $student) {
 
-                    $inscription =
-                        $student->inscriptions->first();
-
-                    return [
-                        'id' => $student->id,
-
-                        'name' => $this->studentName(
-                            $student
-                        ),
-
-                        'matricule' =>
-                            $student->matricule,
-
-                        'class' =>
-                            $inscription?->classe?->code,
-                    ];
-
-                })
-                ->values(),
-        ]);
+        return StudentResource::collection(
+            $students
+        )->response();
     }
 
     public function show(string $identifier): JsonResponse
