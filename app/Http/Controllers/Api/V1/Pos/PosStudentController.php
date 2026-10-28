@@ -70,32 +70,15 @@ class PosStudentController extends Controller
         )->response();
     }
 
-    public function show(string $identifier): JsonResponse
+    public function show(Eleve $eleve): JsonResponse
     {
-        $identifier = trim($identifier);
 
-        if ($identifier === '') {
-            return response()->json([
-                'message' =>
-                    'Student identifier is required.',
-            ], 422);
-        }
 
-        $student = $this->findStudent(
-            $identifier
-        );
-
-        if (! $student) {
-            return response()->json([
-                'message' => 'Student not found.',
-                'identifier' => $identifier,
-            ], 404);
-        }
 
         $anneeId = Annee::id();
 
 
-        $inscription = $student
+        $inscription = $eleve
             ->inscriptions()
             ->with('classe')
             ->where('annee_id', $anneeId)
@@ -107,13 +90,13 @@ class PosStudentController extends Controller
                     'Student is not registered for the current academic year.',
 
                 'student' => [
-                    'id' => $student->id,
+                    'id' => $eleve->id,
 
                     'name' =>
-                        $this->studentName($student),
+                        $this->studentName($eleve),
 
                     'matricule' =>
-                        $student->matricule,
+                        $eleve->matricule,
 
                     'class' => null,
                 ],
@@ -156,13 +139,10 @@ class PosStudentController extends Controller
         $paidByFee = $perceptions
             ->groupBy('frais_id')
             ->map(function ($items) {
-
                 return $items->sum(
                     function ($perception) {
-
                         return (float)
                         $perception->montant;
-
                     }
                 );
             });
@@ -179,8 +159,7 @@ class PosStudentController extends Controller
 
         foreach ($fees as $fee) {
 
-            $amountDue =
-                (float) $fee->montant;
+            $amountDue = (float) $fee->montant;
 
             $currency =
                 $this->enumValue(
@@ -190,17 +169,9 @@ class PosStudentController extends Controller
             $currency =
                 $currency ?: 'USD';
 
-            $amountPaid =
-                (float) (
-                    $paidByFee->get(
-                        $fee->id
-                    ) ?? 0
-                );
+            $amountPaid = (float) ($paidByFee->get($fee->id) ?? 0);
 
-            $outstanding = max(
-                $amountDue - $amountPaid,
-                0
-            );
+            $outstanding = max($amountDue, $amountPaid,);
 
             if ($outstanding <= 0) {
                 continue;
@@ -358,15 +329,15 @@ class PosStudentController extends Controller
             'student' => [
 
                 'id' =>
-                    $student->id,
+                    $eleve->id,
 
                 'name' =>
                     $this->studentName(
-                        $student
+                        $eleve
                     ),
 
                 'matricule' =>
-                    $student->matricule,
+                    $eleve->matricule,
 
                 'class' =>
                     $inscription
@@ -701,31 +672,6 @@ class PosStudentController extends Controller
             'fees' =>
                 $feesData,
         ]);
-    }
-
-    private function findStudent(
-        string $identifier
-    ): ?Eleve {
-
-        return Eleve::query()
-            ->where(function ($query) use ($identifier) {
-
-                $query
-                    ->where(
-                        'matricule',
-                        $identifier
-                    )
-                    ->orWhere(
-                        'numero_permanent',
-                        $identifier
-                    )
-                    ->orWhere(
-                        'id',
-                        $identifier
-                    );
-
-            })
-            ->first();
     }
 
 
