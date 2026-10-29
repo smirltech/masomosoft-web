@@ -49,7 +49,7 @@ Route::prefix('v1')->group(function () {
                 'index'
             ]);
 
-            Route::get('/students/{identifier}', [
+            Route::get('/students/{eleve}', [
                 PosStudentController::class,
                 'show'
             ]);
@@ -69,7 +69,7 @@ Route::prefix('v1')->group(function () {
                 'store'
             ]);
 
-            Route::get('/payments/{reference}', [
+            Route::get('/payments/{perception}', [
                 PosPaymentController::class,
                 'show'
             ]);
