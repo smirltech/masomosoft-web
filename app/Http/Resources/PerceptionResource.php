@@ -32,7 +32,7 @@ class PerceptionResource extends JsonResource
                         'id' => $fee->id,
                         'name' => $fee->nom,
                         'amount' => $this->frais_montant,
-                        'period'=> MinervalMonth::tryFrom($this->custom_property)->label(),
+                        'period'=> MinervalMonth::tryFrom($this->custom_property)?->label(),
                     ],
                 'paid_amount' => $this->montant,
                 'outstanding_amount'=>null,
