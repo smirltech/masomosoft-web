@@ -555,6 +555,13 @@ return [
             'icon' => 'fas fa-fw fa-user-tag',
             'can' => 'roles.view',
         ],
+        [
+            'text' => 'Ecole',
+            'url' => 'school-settings',
+            'icon' => 'fas fa-fw fa-school',
+            'can' => 'schools.update',
+        ],
+
 
     ],
     /*

@@ -7,6 +7,7 @@ use App\Models\Annee;
 use App\Models\Frais;
 use App\Models\Inscription;
 use App\Models\Perception;
+use App\Models\School;
 use App\Traits\HasLivewireAlert;
 use App\Traits\TopMenuPreview;
 use App\View\Components\AdminLayout;
@@ -27,6 +28,7 @@ class PerceptionPrintComponent extends BaseComponent
 
 
     public  Annee $annee;
+    public School $school;
 
     public function mount(Perception $perception): void
     {
@@ -35,6 +37,7 @@ class PerceptionPrintComponent extends BaseComponent
         $this->perception = $perception;
         $this->fee = $this->perception->frais;
         $this->inscription = $this->perception->inscription;
+        $this->school =School::first();
        // $this->printIt();
     }
 

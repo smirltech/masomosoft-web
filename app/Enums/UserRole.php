@@ -27,6 +27,7 @@ enum UserRole: string
                 RolePermission::depenses_all->value,
             ],
             self::admin => [
+                RolePermission::schools_all->value,
                 RolePermission::annees_all->value,
                 RolePermission::operations_all->value,
                 RolePermission::cessions_all->value,
