@@ -79,6 +79,11 @@ class PerceptionCreateComponent extends BaseComponent
 
     }
 
+    public function requiresRate(): bool
+    {
+        return $this->perception->devise != Frais::find($this->perception->frais_id)->devise;
+    }
+
     public function submit(): void
     {
         $this->validate();
@@ -101,7 +106,7 @@ class PerceptionCreateComponent extends BaseComponent
             'perception.frais_montant' => 'required|numeric',
             'perception.devise' => 'required',
             'perception.paid_by' => 'nullable',
-            'perception.taux' => 'required_if:perception.devise,CDF',
+            'perception.taux' => ['numeric', 'nullable'],
             //if frais, frais type is minerval
             'perception.custom_property' => Rule::requiredIf(function () {
                 return Frais::find($this->perception->frais_id)->type == FraisType::MINERVAL;

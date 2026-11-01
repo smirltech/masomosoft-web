@@ -29,9 +29,9 @@
         <div class="col-md-12 mb-3">
             <x-form::select change label="Payé en devise" type="number" :options="Devise::cases()"
                             wire:model="perception.devise"/>
-        @if($perception->devise == Devise::CDF)
+        @if($perception->devise != $fee?->devise)
             <div class="col-md-12 mb-3">
-                <x-form::input required label="Taux du $" wire:model="perception.taux"/>
+                <x-form::input required label="Taux du {{$perception->devise}}" wire:model="perception.taux"/>
             </div>
         @endif
         <div class="col-md-12 mb-3">

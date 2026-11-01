@@ -7,6 +7,9 @@ use EmreYarligan\EnumConcern\EnumConcern;
 enum RolePermission: string
 {
     use EnumConcern;
+
+    // ------------------School ---------------- //
+    case schools_all = 'schools.*';
     //------------------ Mouvements ---------------- //
     case mouvements_all = 'mouvements.*';
     case mouvements_view = 'mouvements.view.*';
@@ -235,6 +238,7 @@ enum RolePermission: string
     {
         return match ($this) {
             default => $this->value,
+            self::schools_all => 'Gérer les paramètres de l\'école',
             // Users
             self::users_create => 'Créer un utilisateur',
             self::users_delete => 'Supprimer un utilisateur',
